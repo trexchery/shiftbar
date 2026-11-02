@@ -1040,6 +1040,10 @@ def main() -> None:
         from claude_swap import handoff
 
         sys.exit(handoff.main(argv[1:]))
+    if argv and argv[0] == "stats-sync":
+        from claude_swap import stats_merge
+
+        sys.exit(stats_merge.main(argv[1:]))
 
     try:
         from claude_swap.appearance import cli_should_probe, cli_theme
@@ -1127,7 +1131,8 @@ Commands:
   %(prog)s export <path>              export accounts
   %(prog)s import <path>              import accounts
   %(prog)s import-usage <path>        adopt usage another machine read (list --json)
-  %(prog)s tui                        interactive dashboard (also: bare %(prog)s)
+  %(prog)s stats-sync [--dry-run]     count every profile's usage in ~/.claude /stats
+  %(prog)s tui                      interactive dashboard (also: bare %(prog)s)
   %(prog)s watch                      dashboard, opened on the live watch page
   %(prog)s menubar                    macOS menu bar app
   %(prog)s menubar --install-service  keep the menu bar running via launchd

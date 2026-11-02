@@ -153,6 +153,7 @@ public sealed partial class TrayApp : ApplicationContext
             if (_settings.AutoPrime && Prime.Problem != _primeProblem && (_primeProblem = Prime.Problem) != null)
                 Notify("Auto-Prime paused", _primeProblem, ToolTipIcon.Warning);
             fresh.Add(("claude", _snap));
+            _engine.StatsSyncTick(Program.Log);
             if (runAuto && _settings.AutoSwitch) await ResumeStoppedAsync(_snap);
             await UpdateAgentAccountsAsync();
             _error = null;

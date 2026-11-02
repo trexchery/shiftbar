@@ -210,6 +210,7 @@ internal sealed partial class BackendHost
                 supervisor.Config.Threshold = threshold;
             supervisor.Config.ConsumeFirst = config.GetValueOrDefault("autoswitch.strategy") == "consume-first";
             accounts = await engine.ListAsync();
+            engine.StatsSyncTick(Program.Log);
             supervisor.Config.Threshold = upkeep.EffectiveThreshold;
             var dirs = ResumeStopped.ConfigDirs(accounts.ActiveAccountNumber);
             var live = await Task.Run(() => ResumeStopped.LiveProfiles(dirs));
