@@ -2,8 +2,8 @@ namespace PatchGoblins;
 
 public enum QuotaState { Normal, Near, Exhausted }
 
-/// `State` is what the window just became: Near, Exhausted, or Normal for "reset".
-public sealed record QuotaAlert(string Who, string Window, QuotaState State, double Pct)
+/// `State` is what the window just became: Near, Exhausted, or Normal for "reset". `Active`: the default login's account.
+public sealed record QuotaAlert(string Who, string Window, QuotaState State, double Pct, bool Active = false)
 {
     public string Line => State switch
     {
@@ -31,7 +31,7 @@ public sealed class QuotaAlerts
             {
                 var key = $"{a.Email}|{a.OrganizationUuid}|{window}";
                 var now = w.Pct >= 100 ? QuotaState.Exhausted : w.Pct >= Palette.WarnPct ? QuotaState.Near : QuotaState.Normal;
-                if (_state.TryGetValue(key, out var was) && Notable(was, now)) alerts.Add(new(a.ShortName, window, now, w.Pct));
+                if (_state.TryGetValue(key, out var was) && Notable(was, now)) alerts.Add(new(a.ShortName, window, now, w.Pct, a.Active));
                 _state[key] = now;
             }
         }

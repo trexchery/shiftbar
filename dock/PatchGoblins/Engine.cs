@@ -117,6 +117,9 @@ public sealed partial class Engine(string exe)
 
     public Task<SwitchResult> SwitchAsync(int number) => RunJsonAsync<SwitchResult>(["switch", number.ToString(), "--json"]);
 
+    /// `switch --strategy best`: the engine moves only to an account with provably more headroom, else stays (a no-op result).
+    public Task<SwitchResult> SwitchBestAsync() => RunJsonAsync<SwitchResult>(["switch", "--strategy", "best", "--json"]);
+
     /// The two calls a usage-limit error makes, not queued behind the gate (an `auto --once` can hold it for ~30 s). Safe:
     /// the engine serializes what it mutates itself, as it must for several terminals (the store's FileLock, Claude Code's
     /// credential lock; `import-usage` under the usage store's), so only the call order is ours.

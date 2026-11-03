@@ -28,6 +28,16 @@ public sealed record StoppedSession(int Pid, string SessionId, string Cwd, strin
     public bool Movable => Done && !Running;
 }
 
+/// A live Claude Code window, as its session record has it: where it runs, the config dir it runs in (so the account),
+/// and the record's status ("busy", "idle", "shell", "waiting"). `Stop`: the scan's stopped entry for it, when it is one
+/// (at a limit, or its terminal gone). `ContinueOn`: the account a stop at a limit can continue on, when one has room.
+public sealed record LiveSession(int Pid, string SessionId, string Cwd, string ConfigDir, int? Account, string Status, DateTime StartedUtc)
+{
+    public StoppedSession? Stop { get; init; }
+    public int? ContinueOn { get; init; }
+    public bool AtLimit => Stop is { AtLimit: true, Orphan: false };
+}
+
 /// A Claude Code workflow run that has not settled (`RunId` "wf_..." under session `SessionId`): the window running it is never closed.
 public sealed record WorkflowRun(string SessionId, string RunId);
 
@@ -527,6 +537,35 @@ public static class ResumeStopped
                             .Where(f => nowUtc - File.GetLastWriteTimeUtc(f) < TimeSpan.FromMinutes(2)).Select(f => (f, dir)));
                 }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException) { }
+            }
+        }
+        return found;
+    }
+
+    /// Every live interactive Claude Code window, for the flyout's Sessions list: read-only, it never touches a process.
+    public static List<LiveSession> LiveSessions(IEnumerable<(string Dir, int? Account)> dirs)
+    {
+        var found = new List<LiveSession>();
+        foreach (var (dir, account) in dirs)
+        {
+            string[] records;
+            try { records = Directory.GetFiles(Path.Combine(dir, "sessions"), "*.json"); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
+            foreach (var rec in records)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(rec));
+                    var r = doc.RootElement;
+                    if (Str(r, "kind") is { } k && k != "interactive" || Headless(r)) continue;
+                    if (Str(r, "sessionId") is not { } id || Str(r, "cwd") is not { } cwd || !r.TryGetProperty("pid", out var p) || !p.TryGetInt32(out var pid)) continue;
+                    var stamp = Str(r, "procStart");
+                    if (!IsLiveClaude(pid, stamp)) continue;
+                    var started = OperatingSystem.IsWindows() && long.TryParse(stamp, out var ft)
+                        ? DateTime.FromFileTimeUtc(ft) : StartOf(pid)?.ToUniversalTime() ?? DateTime.UtcNow;
+                    found.Add(new LiveSession(pid, id, cwd, dir, account, Str(r, "status") ?? "", started));
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException or ArgumentOutOfRangeException) { }
             }
         }
         return found;

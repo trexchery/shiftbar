@@ -10,7 +10,9 @@ public sealed record Window(
     double Pct,
     DateTimeOffset? ResetsAt,
     string? Name = null,
-    bool? AheadOfPace = null);
+    bool? AheadOfPace = null,
+    bool? WillLastToReset = null,
+    DateTimeOffset? ProjectedExhaustionAt = null);
 
 public sealed record Spend(double Used, double Limit, double Pct, string Currency, DateTimeOffset? ResetsAt);
 
@@ -59,7 +61,8 @@ public sealed record Snapshot(int SchemaVersion, int? ActiveAccountNumber, List<
 
 public sealed record AccountRef(int? Number, string Email);
 
-public sealed record SwitchResult(bool Switched, AccountRef? From, AccountRef? To, string? Reason, string? Note = null);
+public sealed record SwitchResult(bool Switched, AccountRef? From, AccountRef? To, string? Reason, string? Note = null,
+    string? Message = null, List<string>? Warnings = null);
 
 public sealed record EngineError(string? Type, string? Message);
 
