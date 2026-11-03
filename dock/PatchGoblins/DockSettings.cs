@@ -14,6 +14,7 @@ public sealed class DockSettings
     public int? PinnedX { get; set; }
     public int? PinnedY { get; set; }
     public bool PreserveRemoteControl { get; set; } = true; // keys absent from an older settings.json keep these defaults
+    public bool ReconnectRemoteControl { get; set; } = true; // types /remote-control into idle default-login windows a switch dropped it in (RemoteControl)
     public bool AutoProjectAccount { get; set; }
     public bool QuotaNotifications { get; set; }
     public bool AutoPrime { get; set; }

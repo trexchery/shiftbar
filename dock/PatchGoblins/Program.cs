@@ -5,6 +5,8 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // The Remote Control helper (ConsoleNudge): its own short-lived process, never a tray, so before the mutex.
+        if (args is ["rc-nudge", ..]) { Environment.ExitCode = ConsoleNudge.Run(args[1..]); return; }
         // Only `--minimized` starts the tray. Anything else is a caller of a retired verb (an older build's `guard` hook or
         // `agents-mcp` server in a still-running claude): refuse it, exit 2 so a hook blocks the tool call, and never start a tray under it.
         if (args.Any(a => a != "--minimized"))

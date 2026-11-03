@@ -817,7 +817,7 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             settings.Search.Text = "quota";
             Eq(["Quota notifications"], settings.VisibleRows.ToList(), "search \"quota\"");
             settings.Search.Text = "";
-            Eq(9, settings.VisibleRows.Count(), "all settings rows");
+            Eq(10, settings.VisibleRows.Count(), "all settings rows");
             True(!settings.VisibleRows.Contains("Move running workflows"), "unsafe workflow migration is not offered");
             form.CloseSettings();
             True(!form.SettingsOpen, "closing settings leaves them open");

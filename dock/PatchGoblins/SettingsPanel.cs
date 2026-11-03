@@ -8,7 +8,7 @@ public sealed class SettingsPanel : UserControl
     public readonly NumericUpDown SwitchBuffer = new() { Minimum = 0, Maximum = 300, Value = 0 };
     public readonly TextBox TerminalFolder = new() { PlaceholderText = "your user folder" };
     public readonly Toggle Startup = new("");
-    public readonly Toggle AutoSwitch = new(""), AutoProject = new(""), QuotaNotify = new(""), AutoPrime = new(""), AutoLine = new("");
+    public readonly Toggle AutoSwitch = new(""), AutoProject = new(""), QuotaNotify = new(""), AutoPrime = new(""), AutoLine = new(""), ReconnectRc = new("");
     public readonly TextBox Search = new() { PlaceholderText = "Search settings" };
 
     public event Action? SaveClicked, CancelClicked;
@@ -39,6 +39,7 @@ public sealed class SettingsPanel : UserControl
         Row("Terminal folder", "Where Open terminal starts", TerminalFolderPicker(), Ui.S(200));
         Row("Use project accounts", "A folder's assigned account", AutoProject, Ui.S(34));
         Row("Quota notifications", "Near, at or past a limit", QuotaNotify, Ui.S(34));
+        Row("Reconnect Remote Control", "In idle windows a login change dropped it in", ReconnectRc, Ui.S(34));
 
         Section("Upkeep");
         Row("Auto-switch near limit", "Moves the default login near a limit", AutoSwitch, Ui.S(34));

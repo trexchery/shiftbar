@@ -961,7 +961,7 @@ public static class ResumeStopped
     }
 
     /// The last lines of a transcript; they can be megabytes long, so only the end is read.
-    static IEnumerable<string> Tail(string path, int bytes = 256 * 1024)
+    internal static IEnumerable<string> Tail(string path, int bytes = 256 * 1024)
     {
         using var f = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         var start = Math.Max(0, f.Length - bytes);

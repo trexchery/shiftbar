@@ -150,6 +150,7 @@ public sealed partial class TrayApp : ApplicationContext
             if (_settings.AutoPrime && Prime.Problem != _primeProblem && (_primeProblem = Prime.Problem) != null)
                 Notify("Auto-Prime paused", _primeProblem, ToolTipIcon.Warning);
             fresh = _snap;
+            RcObserve(_snap.ActiveAccountNumber); // a login change drops Remote Control in default-login windows
             _engine.StatsSyncTick(Program.Log);
             await ResumeStoppedAsync(_snap, recover: runAuto && _settings.AutoSwitch); // the Sessions list and stop notices always; orphan recovery with auto-switch
             _error = null;
@@ -213,6 +214,7 @@ public sealed partial class TrayApp : ApplicationContext
                 _limitWatch.Sync(dirs.Select(d => d.Dir));
                 _limitWatch.Poll(ResumeStopped.LiveTranscripts(dirs, DateTime.UtcNow));
             });
+            await RcTickAsync();
         }
         catch (Exception e) { Program.Log(e); }
         finally { _watching = false; }
@@ -355,7 +357,7 @@ public sealed partial class TrayApp : ApplicationContext
                 || ResumeStopped.HasLiveTwin(s)) continue;
             if (!await ResumeStopped.CloseAsync(s.Pid, s.Record)) continue;
             try { ResumeStopped.CopyTranscript(s, dir); } catch (Exception e) { Program.Log(e); }
-            try { _engine.LaunchConsole($"Claude · #{n} · resumed", s.Cwd, Launch.Run(n, _settings.PreserveRemoteControl, ResumeStopped.ResumeArgs(s))); }
+            try { _engine.LaunchConsole($"Claude · #{n} · resumed", s.Cwd, Launch.Run(n, _settings.PreserveRemoteControl, RemoteControl.WithRc(ResumeStopped.ResumeArgs(s), s.Transcript, _settings.PreserveRemoteControl))); }
             catch (Exception e)
             {
                 Program.Log(e); // its claude is already ended: say so, the transcript is intact for `--resume`
@@ -374,6 +376,7 @@ public sealed partial class TrayApp : ApplicationContext
     {
         _switches++;
         if (_snap is { } s) _snap = s with { ActiveAccountNumber = n, Accounts = [.. s.Accounts.Select(a => a with { Active = a.Number == n })] };
+        RcObserve(n);
     }
 
     static string MovesPath => Path.Combine(DockSettings.Dir, "resumed.json");
@@ -668,6 +671,7 @@ public sealed partial class TrayApp : ApplicationContext
         f.TerminalFolder.Text = _settings.TerminalFolder ?? "";
         f.QuotaNotify.Checked = _settings.QuotaNotifications;
         f.AutoPrime.Checked = _settings.AutoPrime;
+        f.ReconnectRc.Checked = _settings.ReconnectRemoteControl;
         f.CancelClicked += _dash.CloseSettings;
         f.SaveClicked += () => _ = SaveSettingsAsync(f);
         if (!_dash.Visible) ShowDashboard();
@@ -685,6 +689,7 @@ public sealed partial class TrayApp : ApplicationContext
             if (f.QuotaNotify.Checked != _settings.QuotaNotifications) _quota = new(); // switching on starts from a fresh, silent baseline
             _settings.QuotaNotifications = f.QuotaNotify.Checked;
             _settings.AutoPrime = f.AutoPrime.Checked;
+            _settings.ReconnectRemoteControl = f.ReconnectRc.Checked;
             _settings.AutoLine = f.AutoLine.Checked;
             _settings.Save();
             _timer.Interval = TimerMs;

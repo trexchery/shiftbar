@@ -69,6 +69,7 @@ The terminal keeps the goblin theme, session commands, status line, and mascot p
 
 - Auto-switch uses an exclusive Keychain login and skips accounts held by another session. User terminals, including tabs and workflow sessions, remain open; a session at its limit may need attention from its owner. Patch Goblins does not close or automatically migrate those sessions.
 - Headless runs owned by the Supervisor may yield their account when safe; unknown headless runs and user terminals keep their account.
+- Remote Control is not reconnected after a switch. A switch of the default login drops Remote Control in running Claude Code windows; on Windows the tray types `/remote-control` into idle ones (`dock/PatchGoblins/RemoteControl.cs`, `ConsoleNudge.cs`), but macOS has no equivalent yet (TODO: it would need the Accessibility API to read and type into Terminal). Type `/remote-control` in each window yourself.
 
 ## Build and verification
 

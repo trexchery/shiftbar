@@ -15,9 +15,10 @@ public static class ContinueOn
             now: now, refusedUntil: refusedUntil, scopedRefused: scopedRefused);
     }
 
-    /// The engine arguments: `run N [--restore-rc] -- --resume <session> "A usage limit was hit. Continue."`.
+    /// The engine arguments: `run N [--restore-rc] -- --resume <session> "A usage limit was hit. Continue." [--remote-control]`,
+    /// the last when the stopped session itself had Remote Control (`RemoteControl.WithRc`).
     public static string[] Args(StoppedSession s, int account, bool restoreRc) =>
-        Launch.Run(account, restoreRc, ResumeStopped.ResumeArgs(s with { AtLimit = true }));
+        Launch.Run(account, restoreRc, RemoteControl.WithRc(ResumeStopped.ResumeArgs(s with { AtLimit = true }), s.Transcript, restoreRc));
 
     /// Where `--resume` must find the transcript for `account`: the default login's dir when it is the active one (`cswap
     /// run` then runs plain `claude`), else its profile, or where `cswap run` creates it on the first run. Null: not listed.
