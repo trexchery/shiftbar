@@ -219,39 +219,16 @@ def harness(temp_home: Path) -> EngineHarness:
     return h
 
 
-@pytest.mark.parametrize("scan", [([object()], 0), ([], 1)])
-def test_auto_switch_preserves_live_or_unreadable_default_sessions(harness, scan):
-    credentials = harness.switcher._read_credentials()
-    with patch("claude_swap.process_detection.scan_sessions", return_value=scan):
-        outcome = harness.tick_with_usage({"1": _usage(95), "2": _usage(10), "3": _usage(30)})
-    assert outcome is TickOutcome.ERROR
-    assert harness.active_number() == 1
-    assert harness.switcher._read_credentials() == credentials
-    assert any("automatic account switch deferred" in e.message for e in harness.events if isinstance(e, ErrorEvent))
-
-
-def test_auto_switch_defers_if_default_session_directory_cannot_be_read(harness):
-    with patch("claude_swap.process_detection.scan_sessions", side_effect=PermissionError("denied")):
-        outcome = harness.tick_with_usage({"1": _usage(95), "2": _usage(10), "3": _usage(30)})
-    assert outcome is TickOutcome.ERROR
-    assert harness.active_number() == 1
-
-
-def test_auto_switch_detects_a_real_default_session_record(harness):
+def test_auto_switch_proceeds_while_default_sessions_are_live(harness):
+    """Live default-profile windows must not block an automatic switch: they are
+    almost always open, so deferring until they exit disabled auto-switch
+    outright (f47e72d). The windows pick up the new login on their own."""
     sessions = harness.temp_home / ".claude" / "sessions"
     (sessions / f"{os.getpid()}.json").write_text(json.dumps({
         "pid": os.getpid(), "sessionId": "test-session", "kind": "interactive",
     }))
-    credentials = harness.switcher._read_credentials()
-    assert harness.tick_with_usage({"1": _usage(95), "2": _usage(10), "3": _usage(30)}) is TickOutcome.ERROR
-    assert harness.active_number() == 1
-    assert harness.switcher._read_credentials() == credentials
-
-
-def test_auto_switch_defers_when_default_session_directory_missing(harness):
-    (harness.temp_home / ".claude" / "sessions").rmdir()
-    assert harness.tick_with_usage({"1": _usage(95), "2": _usage(10), "3": _usage(30)}) is TickOutcome.ERROR
-    assert harness.active_number() == 1
+    assert harness.tick_with_usage({"1": _usage(95), "2": _usage(10), "3": _usage(30)}) is TickOutcome.SWITCHED
+    assert harness.active_number() == 2
 
 
 class TestEngineHarnessIsolation:
