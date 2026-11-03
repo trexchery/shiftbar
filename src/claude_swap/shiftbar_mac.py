@@ -175,7 +175,8 @@ def run_terminal(argv: list[str], *, cwd: str | None = None) -> Path:
     """Open an argv-safe private command file in the user's macOS Terminal."""
     if sys.platform != "darwin":
         raise ClaudeSwitchError("Opening Terminal is available on macOS only.")
-    root = Path.home() / "Library" / "Application Support" / "shiftbar" / "terminal"
+    data = env_value("DATA")  # an isolated instance keeps its launch scripts in its own folder
+    root = (Path(data) if data else Path.home() / "Library" / "Application Support" / "shiftbar") / "terminal"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     import uuid
     path = root / ("session-" + uuid.uuid4().hex + ".command")
@@ -507,6 +508,17 @@ def _old_app_running(old_data: Path) -> bool:
     return False
 
 
+_LEFT_BEHIND = "agents"  # Patch Goblins' retired agents and their git worktrees: git knows them by that path
+
+
+def _has_data(old: Path) -> bool:
+    """Whether an old data folder holds anything still to carry over."""
+    try:
+        return old.is_dir() and any(entry.name != _LEFT_BEHIND for entry in old.iterdir())
+    except OSError:
+        return True
+
+
 def migrate_from_patch_goblins(home: Path | None = None, running=_old_app_running) -> None:
     """One-time carry-over from the pre-rename Patch Goblins: its data folder and its login item.
 
@@ -520,7 +532,7 @@ def migrate_from_patch_goblins(home: Path | None = None, running=_old_app_runnin
     support = home / "Library" / "Application Support"
     old, new = support / "patch-goblins", support / "shiftbar"
     old_agents = [path for path in (plist_path(label, home) for label in _OLD_LOGIN_LABELS) if path.exists()]
-    if not old.is_dir() and not old_agents:
+    if not _has_data(old) and not old_agents:
         return
     if running(old):
         raise ClaudeSwitchError("The old Patch Goblins app is still running. Quit it (menu bar, Quit), "
@@ -529,12 +541,12 @@ def migrate_from_patch_goblins(home: Path | None = None, running=_old_app_runnin
     shutil.rmtree(support / "Patch Goblins" / "terminal", ignore_errors=True)
     with contextlib.suppress(OSError):
         (support / "Patch Goblins").rmdir()
-    if old.is_dir() and not new.exists():
-        old.rename(new)
-    elif old.is_dir():
-        # A Shiftbar folder that already exists (a log from an earlier start, say) keeps its entries; the rest move in.
+    if old.is_dir():
+        # Entry by entry, as on Windows: the retired agents' git worktrees stay where git knows them, and a Shiftbar
+        # folder that already exists (a log from an earlier start, say) keeps its entries; the rest move in.
+        new.mkdir(parents=True, exist_ok=True)
         for entry in old.iterdir():
-            if not (new / entry.name).exists():
+            if entry.name != _LEFT_BEHIND and not (new / entry.name).exists():
                 try:
                     entry.rename(new / entry.name)
                 except OSError:

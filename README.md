@@ -23,10 +23,10 @@
 
 ## Why Shiftbar
 
-- **🔀 Switch without breaking anything.** One click, or auto-switch near a limit. A switch never closes or restarts a window, and Remote Control reconnects in idle windows afterwards.
+- **🔀 Switch without breaking anything.** One click, or auto-switch near a limit. A switch never closes or restarts a window, and on Windows Remote Control reconnects in idle windows afterwards.
 - **🪟 Accounts side by side.** Open a terminal as any account while the others keep running. Pin a project folder to an account.
 - **📊 Every limit in one place.** 5-hour and weekly meters for each account, a pace forecast, the next reset, and one `/stats` across all accounts.
-- **⏭️ Carry on at a limit.** When a session stops at its limit, one click continues it on the account with room, conversation intact.
+- **⏭️ Carry on at a limit.** On Windows, when a session stops at its limit, one click continues it on the account with room, conversation intact.
 
 ## How it compares
 
@@ -70,8 +70,8 @@ Shiftbar is built on claude-swap's credential and usage engine. Everything stays
 
 - terminal per account
 - folder pins
-- live Sessions panel
-- Remote Control reconnect
+- live Sessions panel (Windows)
+- Remote Control reconnect (Windows)
 
 </td>
 <td width="33%" valign="top">
@@ -79,7 +79,7 @@ Shiftbar is built on claude-swap's credential and usage engine. Everything stays
 **Limits**
 
 - auto-switch (opt-in)
-- Continue on the best account
+- Continue on the best account (Windows)
 - quota alerts (opt-in)
 - Auto-Prime (opt-in)
 
@@ -94,8 +94,8 @@ Shiftbar is built on claude-swap's credential and usage engine. Everything stays
 <summary><b>Good to know</b></summary>
 
 - **Local only.** No telemetry, no cloud sync, no proxy. Logins stay on your machine: DPAPI on Windows, the Keychain on macOS.
-- **Never interrupts.** Shiftbar doesn't close or restart a window you can see. With auto-switch on, a session whose terminal has already died is reopened with `--resume`. The only thing it ever types is `/remote-control`, into an idle window with an empty prompt, while you're away from the keyboard.
-- **Windows only, for now:** the Sessions panel, Continue on, and Remote Control reconnect. macOS has the rest in its menu bar.
+- **Never interrupts.** Shiftbar doesn't close or restart a window you can see. With auto-switch on, a session whose terminal has already died is reopened with `--resume` (Windows). The only thing it ever types is `/remote-control`, into an idle window with an empty prompt, while you're away from the keyboard.
+- **Windows only, for now:** the Sessions panel, Continue on, reopening dead sessions with `--resume`, and Remote Control reconnect. macOS has the rest in its menu bar; [docs/macos.md](docs/macos.md) lists the gaps.
 - **One `/stats`.** Usage on your other accounts is added to the "All time" view of your normal `claude` once each UTC day ends. Preview with `cswap stats-sync --dry-run`.
 - **Unsigned releases**, so SmartScreen may warn. A `.sha256` checksum ships with every download. See [SECURITY.md](SECURITY.md).
 - **Upgrading from Patch Goblins:** quit the old tray and run `shiftbar.exe` once. Settings, logins and autostart carry over.

@@ -690,7 +690,7 @@ def run(switcher, *, extension=None, app_name="claude-swap", icon=None) -> int:
                 )
             except Exception as e:  # never let a bad start crash the menu bar
                 self.switcher._logger.warning("auto-switch engine failed to start: %s", e)
-                rumps.notification("claude-swap", "Auto-switch failed to start", str(e))
+                rumps.notification(app_name, "Auto-switch failed to start", str(e))
                 return
             self._engine = engine
             threading.Thread(target=self._run_engine, args=(engine,), daemon=True).start()
@@ -723,17 +723,17 @@ def run(switcher, *, extension=None, app_name="claude-swap", icon=None) -> int:
                 events, self._engine_events = self._engine_events, []
             for ev in events:
                 if ev.kind == "switch" and not getattr(ev, "dry_run", False):
-                    rumps.notification("claude-swap", "Auto-switched account", ev.human())
+                    rumps.notification(app_name, "Auto-switched account", ev.human())
                     self.refresh_async()  # reflect the switch promptly
                 elif ev.kind == "account-quarantined":
-                    rumps.notification("claude-swap", "Account quarantined", ev.human())
+                    rumps.notification(app_name, "Account quarantined", ev.human())
                 elif ev.kind == "all-exhausted":
-                    rumps.notification("claude-swap", "All accounts exhausted", ev.human())
+                    rumps.notification(app_name, "All accounts exhausted", ev.human())
                 elif ev.kind == "config-warning":
                     # e.g. an autoswitch.model name no account reports — the
                     # engine emits it once per run; dropping it would leave a
                     # menu-bar user with a silently inert filter.
-                    rumps.notification("claude-swap", "Configuration warning", ev.human())
+                    rumps.notification(app_name, "Configuration warning", ev.human())
 
         def _threshold(self) -> int:
             """Current auto-switch threshold from core settings (for the menu)."""
@@ -905,12 +905,12 @@ def run(switcher, *, extension=None, app_name="claude-swap", icon=None) -> int:
                 fn()
                 return True
             except ClaudeSwitchError as e:
-                rumps.alert(title="claude-swap", message=str(e))
+                rumps.alert(title=app_name, message=str(e))
                 return False
 
         def _notify_switched(self):
             rumps.notification(
-                "claude-swap",
+                app_name,
                 "Account switched",
                 "Switch takes effect within ~30s — restart Claude Code to apply immediately.",
             )
@@ -990,7 +990,7 @@ def run(switcher, *, extension=None, app_name="claude-swap", icon=None) -> int:
 
         def on_refresh_creds(self, _sender):
             if self.switcher._get_current_account() is None:
-                rumps.alert(title="claude-swap",
+                rumps.alert(title=app_name,
                             message="No active Claude Code login detected. Log in first.")
                 return
             try:
@@ -1000,14 +1000,14 @@ def run(switcher, *, extension=None, app_name="claude-swap", icon=None) -> int:
                 # credential lives in the macOS Keychain, which a background agent
                 # can't read (the security call times out). Point at the fix.
                 rumps.alert(
-                    title="claude-swap",
+                    title=app_name,
                     message="Couldn't read the active credential. If the menu bar is running "
                             "as a background/login agent, macOS blocks its Keychain access — "
                             "quit and relaunch it from a Terminal with: cswap --menubar",
                 )
                 return
             except ClaudeSwitchError as e:
-                rumps.alert(title="claude-swap", message=str(e))
+                rumps.alert(title=app_name, message=str(e))
                 return
             self.refresh_async()
 
@@ -1062,7 +1062,7 @@ def run(switcher, *, extension=None, app_name="claude-swap", icon=None) -> int:
                 try:
                     set_setting(self.switcher.backup_dir, "autoswitch.threshold", str(pct))
                 except Exception as e:
-                    rumps.alert(title="claude-swap", message=f"Couldn't set threshold: {e}")
+                    rumps.alert(title=app_name, message=f"Couldn't set threshold: {e}")
                     return
                 self._restart_engine()  # apply immediately if running
                 self.rebuild_menu()

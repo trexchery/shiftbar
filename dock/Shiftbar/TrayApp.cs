@@ -642,8 +642,8 @@ public sealed partial class TrayApp : ApplicationContext
                 "including any rules on multiple accounts and usage limits. Use only accounts that are yours.\n" +
                 "• It never bypasses a limit: an exhausted account stays exhausted until it resets.\n" +
                 "• Excluded accounts, accounts whose login has expired, and API-key accounts are never chosen.\n" +
-                "• Automatic switches wait while a default-login session is open. Your terminals and workflows " +
-                "are never closed or reopened automatically. Manual account switches can change the login used by an open session.\n" +
+                "• Automatic switches can happen while sessions are open, and they can change the login an open session uses. " +
+                "A window you can see is never closed or restarted; a session whose terminal has already died may be reopened with --resume.\n" +
                 "• Polling is conservative: the engine spaces out usage checks per account.\n\n" +
                 "Shiftbar is an independent project, not affiliated with or endorsed by Anthropic.\n\nEnable auto-switch?",
                 "Shiftbar — auto-switch", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes;

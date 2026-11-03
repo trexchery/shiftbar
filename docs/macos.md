@@ -66,7 +66,10 @@ The backend takes a private instance lock and runs on a single-thread synchroniz
 
 - **No Sessions panel and no Continue on.** The Windows tray lists live Claude Code windows and reopens a stopped one on an account with room. On macOS, with auto-switch on, a session stopped at its limit raises a "Terminal needs attention" notice when another account has room; the session stays open and you continue it yourself.
 - **Remote Control is not reconnected after a switch (Windows only).** A switch of the default login drops Remote Control in running Claude Code windows. On Windows the tray types `/remote-control` into idle ones (`dock/Shiftbar/RemoteControl.cs`, `ConsoleNudge.cs`); macOS has no equivalent yet (it would need the Accessibility API to read and type into Terminal). Type `/remote-control` in each window yourself.
-- **Switching is exclusive.** The default login never moves onto an account another `cswap run` terminal is holding, because on macOS nothing keeps the two logins in step.
+- **Exclusive switching is automatic only.** Automatic switches never move the default login onto an account another `cswap run` terminal is holding, because on macOS nothing keeps the two logins in step. A manual switch from the menu to such an account only warns.
+- **No consent dialog.** The Windows tray asks you to acknowledge Anthropic's terms the first time you turn on auto-switch; the macOS menu does not. The README's terms note applies all the same.
+- **Auto-switch threshold applies when Adaptive is off.** With **Adaptive switch threshold** on (the default), the backend picks the line per account and the fixed **Auto-switch threshold** menu is not used.
+- **Two settings are file-only.** The backend poll interval (`refreshSeconds` in `settings.json`) and the switch delay (`cswap config`) have no macOS menu entry.
 - **Menu bar menus, not a flyout.** Usage meters and pace lines are the engine's menu bar and dashboard, not the Windows flyout.
 
 ## Build and verification
