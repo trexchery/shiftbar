@@ -113,6 +113,7 @@ Full details, limits and costs: **[docs/agents.md](docs/agents.md)**.
 - **One account works too.** Agents then share it: they queue while your own terminals are busy and never close a session of yours.
 - **The goblin terminal** is a session-only theme. A small preload script swaps Claude Code's mascot glyphs for the goblin on their way to the screen. Nothing of Claude's is modified or installed.
 - **Unsigned releases**, so SmartScreen may warn. macOS builds are ad hoc signed and not notarized, so Gatekeeper may ask too. A `.sha256` checksum ships with every download. See [SECURITY.md](SECURITY.md).
+- **One `/stats` for the team.** Usage on your other accounts (goblins, account terminals, moved windows) is added to the "All time" view of your normal `claude` once each UTC day ends. Only `~/.claude/stats-cache.json` is written, each day once; a moved session counts once. The 7-day and 30-day tabs still show only your normal login's usage. Run `cswap stats-sync --dry-run` to preview.
 - **Upgrading** from handoff, Autodock, or ClautoSwap: quit the old tray and run the new exe once. Settings, agents, and logins carry over.
 
 </details>

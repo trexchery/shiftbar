@@ -1024,3 +1024,33 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
         });
     }
 }
+
+public class StatsSyncTests
+{
+    [Fact]
+    public async Task RunsOnceThenRestsHalfAnHourAndLogsAFailure()
+    {
+        using var dir = new TempDir();
+        var calls = Path.Combine(dir.Path, "calls.txt");
+        var ok = Path.Combine(dir.Path, "ok.cmd");
+        File.WriteAllText(ok, $"@echo %*>>\"{calls}\"\r\n@echo {{\"status\":\"current\"}}\r\n");
+        var errors = new List<Exception>();
+        var engine = new Engine(ok);
+        engine.StatsSyncTick(errors.Add);
+        var first = engine.StatsSync;
+        engine.StatsSyncTick(errors.Add); // still running
+        Assert.Same(first, engine.StatsSync);
+        await first!;
+        engine.StatsSyncTick(errors.Add); // done, but within the half hour
+        Assert.Same(first, engine.StatsSync);
+        Assert.Equal("stats-sync --json", File.ReadAllText(calls).Trim());
+        Assert.Empty(errors);
+
+        var fail = Path.Combine(dir.Path, "fail.cmd");
+        File.WriteAllText(fail, "@echo {\"status\":\"error\",\"reason\":\"ledger unreadable\"}\r\n@exit /b 1\r\n");
+        var broken = new Engine(fail);
+        broken.StatsSyncTick(errors.Add);
+        await broken.StatsSync!;
+        Assert.Contains("ledger unreadable", Assert.Single(errors).Message);
+    }
+}

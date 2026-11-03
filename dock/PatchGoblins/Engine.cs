@@ -137,6 +137,29 @@ public sealed partial class Engine(string exe)
         if (r.ExitCode != 0) throw new EngineException(LastLine(r.Stderr) ?? $"engine exited {r.ExitCode}");
     }
 
+    DateTime _statsSyncAt = DateTime.MinValue;
+    internal Task? StatsSync { get; private set; }
+
+    /// Counts the `cswap run` profiles' Claude Code usage in the default login's /stats (`stats-sync`): on the first call, then
+    /// every 30 minutes, one at a time, never awaited. Ungated: a first backfill reads every profile's transcripts, minutes the
+    /// list and switch calls must not wait behind; the engine takes its own lock and writes only the stats cache and its ledger.
+    public void StatsSyncTick(Action<Exception> log)
+    {
+        if (StatsSync is { IsCompleted: false } || DateTime.UtcNow - _statsSyncAt < TimeSpan.FromMinutes(30)) return;
+        _statsSyncAt = DateTime.UtcNow;
+        StatsSync = StatsSyncAsync(log);
+    }
+
+    async Task StatsSyncAsync(Action<Exception> log)
+    {
+        try
+        {
+            var r = await RunAsync(["stats-sync", "--json"], TimeSpan.FromMinutes(30), gated: false);
+            if (r.ExitCode != 0) throw new EngineException(LastLine(Redact(r.Stdout)) ?? LastLine(r.Stderr) ?? $"stats-sync exited {r.ExitCode}");
+        }
+        catch (Exception e) { log(e); }
+    }
+
     /// Writes local hand-off notes from `source`'s newest session in `folder`; returns their path.
     public Task<HandoffResult> HandoffAsync(string source, string folder) =>
         RunJsonAsync<HandoffResult>(["handoff", "--from", source, "--dir", folder, "--json"]);
