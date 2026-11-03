@@ -4,33 +4,39 @@ using Microsoft.Win32;
 
 namespace Shiftbar;
 
-/// The one brand green: the tray's dots, buttons, switches and meters all read it.
+/// The one brand indigo: buttons, switches, the active account's dot and toasts read it. Both pass 4.5:1 as text on
+/// their theme's background, and with the background as text on them (primary buttons).
 public static class Brand
 {
-    public const string DarkHex = "#5BD25B", LightHex = "#2E7D32";
+    public const string DarkHex = "#8B93FF", LightHex = "#4F5BD5";
     public static readonly Color Dark = ColorTranslator.FromHtml(DarkHex), Light = ColorTranslator.FromHtml(LightHex);
+}
+
+/// Status green: meters and the tray dot while a window has room. Never the brand.
+public static class Healthy
+{
+    public static readonly Color Dark = ColorTranslator.FromHtml("#5BD25B"), Light = ColorTranslator.FromHtml("#2E7D32");
 }
 
 public sealed record Palette(
     bool IsDark, Color Back, Color Card, Color Text, Color Muted, Color Faint, Color Track,
-    Color Live, Color Border, Color Hover, Color Pressed)
+    Color Live, Color Border, Color Hover, Color Pressed, Color Ok)
 {
     public static Palette Current => (ForceDark is { } d ? !d : IsLight()) ? Light : Dark;
 
     /// Tests and screenshots pin a theme instead of reading Windows'.
     internal static bool? ForceDark;
 
-    // Neutral greys plus the one goblin green (Brand): green for what is live or healthy, amber and red
-    // for meters that are close to a limit.
+    // Neutral greys plus the brand indigo (Live) for controls; green, amber and red only for status (meters, the tray dot).
     static readonly Palette Light = new(false,
         Color.FromArgb(249, 249, 249), Color.White, Color.FromArgb(24, 24, 24), Color.FromArgb(112, 112, 112),
         Color.FromArgb(160, 160, 160), Color.FromArgb(0, 0, 0, 0x14), Brand.Light,
-        Color.FromArgb(0, 0, 0, 0x14), Color.FromArgb(0, 0, 0, 0x08), Color.FromArgb(0, 0, 0, 0x10));
+        Color.FromArgb(0, 0, 0, 0x14), Color.FromArgb(0, 0, 0, 0x08), Color.FromArgb(0, 0, 0, 0x10), Healthy.Light);
 
     static readonly Palette Dark = new(true,
         Color.FromArgb(32, 32, 32), Color.FromArgb(40, 40, 40), Color.FromArgb(236, 236, 236), Color.FromArgb(150, 150, 150),
         Color.FromArgb(100, 100, 100), Color.FromArgb(0x1A, 255, 255, 255), Brand.Dark,
-        Color.FromArgb(0x16, 255, 255, 255), Color.FromArgb(0x0C, 255, 255, 255), Color.FromArgb(0x16, 255, 255, 255));
+        Color.FromArgb(0x16, 255, 255, 255), Color.FromArgb(0x0C, 255, 255, 255), Color.FromArgb(0x16, 255, 255, 255), Healthy.Dark);
 
     static bool IsLight()
     {
@@ -43,13 +49,13 @@ public sealed record Palette(
     /// Where meters turn amber; quota notifications use the same line.
     public const double WarnPct = 80;
 
-    /// Meter fill: goblin green until a window is nearly spent.
+    /// Meter fill: status green until a window is nearly spent.
     public Color Meter(double pct) =>
-        pct >= 95 ? Critical : pct >= WarnPct ? Warn : Live;
+        pct >= 95 ? Critical : pct >= WarnPct ? Warn : Ok;
 
     /// Tray dot (needs to read on any taskbar).
     public static Color ForPct(double pct) =>
-        pct >= 95 ? Critical : pct >= WarnPct ? Warn : Brand.Dark;
+        pct >= 95 ? Critical : pct >= WarnPct ? Warn : Healthy.Dark;
 }
 
 /// Test pins for what Ui reads from the display; always null in the app. The tests set them before Ui is first touched
