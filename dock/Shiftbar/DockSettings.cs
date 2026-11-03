@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.Win32;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// Dock-only preferences. Auto-switch thresholds live in the engine's
 /// settings.json (`cswap config`) so the CLI and the dock never disagree.
@@ -24,14 +24,16 @@ public sealed class DockSettings
 
     public const int MinRefreshSeconds = 60;
 
-    /// The `PATCH_GOBLINS_<name>` variable, or its pre-rename `HANDOFF_<name>`.
-    public static string? Env(string name) =>
-        Environment.GetEnvironmentVariable("PATCH_GOBLINS_" + name) is { Length: > 0 } v ? v : Environment.GetEnvironmentVariable("HANDOFF_" + name);
+    /// Variable prefixes, newest first: `SHIFTBAR_<name>`, then the pre-rename `PATCH_GOBLINS_<name>` and `HANDOFF_<name>`.
+    internal static readonly string[] EnvPrefixes = { "SHIFTBAR_", "PATCH_GOBLINS_", "HANDOFF_" };
 
-    /// PATCH_GOBLINS_DATA runs a separate, isolated instance (development, benchmarks).
+    public static string? Env(string name) =>
+        EnvPrefixes.Select(p => Environment.GetEnvironmentVariable(p + name)).FirstOrDefault(v => v is { Length: > 0 });
+
+    /// SHIFTBAR_DATA runs a separate, isolated instance (development, benchmarks).
     public static string Dir => Env("DATA") is { Length: > 0 } d ? d : Path.Combine(
         OperatingSystem.IsMacOS() ? Path.Combine(StoreSecurity.UserProfile, "Library", "Application Support")
-            : Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "patch-goblins");
+            : Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "shiftbar");
 
     static string FilePath => Path.Combine(Dir, "settings.json");
 
@@ -81,8 +83,9 @@ public static class AtomicFile
 
 public static class Startup
 {
-    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string Name = "patch-goblins";
+    internal const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
+    internal const string Name = "shiftbar";
+    internal static string Command => $"\"{Environment.ProcessPath}\" --minimized";
 
     public static bool IsEnabled()
     {
@@ -95,11 +98,11 @@ public static class Startup
     {
         if (!OperatingSystem.IsWindows()) { SetLoginAgent(enabled); return; }
         using var k = Registry.CurrentUser.CreateSubKey(RunKey);
-        if (enabled) k.SetValue(Name, $"\"{Environment.ProcessPath}\" --minimized");
+        if (enabled) k.SetValue(Name, Command);
         else k.DeleteValue(Name, throwOnMissingValue: false);
     }
 
-    static string LoginAgent => Path.Combine(StoreSecurity.UserProfile, "Library", "LaunchAgents", "com.patchgoblins.app.plist");
+    static string LoginAgent => Path.Combine(StoreSecurity.UserProfile, "Library", "LaunchAgents", "com.shiftbar.app.plist");
 
     static void SetLoginAgent(bool enabled)
     {
@@ -108,7 +111,7 @@ public static class Startup
         var executable = DockSettings.Env("APP_EXECUTABLE") ?? Environment.ProcessPath
             ?? throw new InvalidOperationException("Application executable unavailable");
         var xml = new System.Xml.Linq.XElement("plist", new System.Xml.Linq.XAttribute("version", "1.0"),
-            new System.Xml.Linq.XElement("dict", new System.Xml.Linq.XElement("key", "Label"), new System.Xml.Linq.XElement("string", "com.patchgoblins.app"),
+            new System.Xml.Linq.XElement("dict", new System.Xml.Linq.XElement("key", "Label"), new System.Xml.Linq.XElement("string", "com.shiftbar.app"),
                 new System.Xml.Linq.XElement("key", "ProgramArguments"), new System.Xml.Linq.XElement("array", new System.Xml.Linq.XElement("string", executable)),
                 new System.Xml.Linq.XElement("key", "RunAtLoad"), new System.Xml.Linq.XElement("true")));
         AtomicFile.WriteAllText(LoginAgent, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" + xml);

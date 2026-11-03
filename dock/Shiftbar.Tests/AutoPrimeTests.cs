@@ -1,7 +1,7 @@
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 // All accounts and credentials here are synthetic.
 public class AutoPrimeTests
@@ -231,7 +231,7 @@ public sealed class AutoPrimeEngineTests : IDisposable
     {
         var log = Path.Combine(_tmp.Path, "cswap.log");
         Set("FAKE_LOG", log);
-        Set("PATCH_GOBLINS_DATA", _tmp.Path);
+        Set("SHIFTBAR_DATA", _tmp.Path);
         Set("ANTHROPIC_API_KEY", "sk-ant-api03-SYNTHETIC"); // must never reach the request
         Set("CLAUDECODE", "1"); // (CLAUDE_CONFIG_DIR: covered by PrimeUnset's test; the engine tests own that variable)
         var engine = new Engine(Path.Combine(AppContext.BaseDirectory, "fakes", "cswap.cmd"));
@@ -273,12 +273,12 @@ public class TerminalEnvironmentTests
         {
             ["PATH"] = @"C:\Windows", ["USERPROFILE"] = @"C:\Users\me", ["CLAUDE_EFFORT"] = "high", ["CLAUDE_CODE_GIT_BASH_PATH"] = @"C:\Git\bin\bash.exe",
         };
-        // Patch Goblins started from inside a session: everything that session set up for its tools goes.
-        var fromSession = Env(("CLAUDECODE", "1"), ("CLAUDE_CODE_CHILD_SESSION", "1"), ("CLAUDE_CODE_MESSAGING_TOKEN", "x"), ("CLAUDE_PID", "1"), ("PATCH_GOBLINS_DATA", @"C:\dev"),
+        // Shiftbar started from inside a session: everything that session set up for its tools goes.
+        var fromSession = Env(("CLAUDECODE", "1"), ("CLAUDE_CODE_CHILD_SESSION", "1"), ("CLAUDE_CODE_MESSAGING_TOKEN", "x"), ("CLAUDE_PID", "1"), ("SHIFTBAR_DATA", @"C:\dev"),
             ("AI_AGENT", "claude-code_agent"), ("NO_COLOR", "1"), ("GIT_EDITOR", "true"), ("GIT_TERMINAL_PROMPT", "0"), ("PROMPT", "$P$G"),
             ("PATH", @"C:\Windows;C:\session-only"), ("USERPROFILE", @"C:\Users\me"));
         Engine.TopLevel(fromSession, () => windows);
-        Assert.Equal(windows.Append(KeyValuePair.Create("PATCH_GOBLINS_DATA", @"C:\dev")).OrderBy(v => v.Key), // Patch Goblins' own instance stays
+        Assert.Equal(windows.Append(KeyValuePair.Create("SHIFTBAR_DATA", @"C:\dev")).OrderBy(v => v.Key), // Shiftbar's own instance stays
             fromSession.OrderBy(v => v.Key).Select(v => KeyValuePair.Create(v.Key, v.Value!)));
 
         // Started normally: the environment is the owner's own; only stray session markers go.

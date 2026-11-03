@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// A folder assigned to an account (one entry of the engine's mappings.json).
 public sealed record ProjectMapping(string Folder, string Email, string Org)

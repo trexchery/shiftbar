@@ -1,6 +1,6 @@
 """Executable desktop protocol contract, with a synthetic engine only.
 
-Run after dotnet build with PATCH_GOBLINS_TEST_BACKEND set to the apphost.
+Run after dotnet build with SHIFTBAR_TEST_BACKEND set to the apphost.
 The same tests exercise Linux DDC and the Apple Silicon executable in CI.
 """
 from __future__ import annotations
@@ -19,9 +19,9 @@ import pytest
 
 @pytest.fixture
 def host(tmp_path):
-    executable = os.environ.get("PATCH_GOBLINS_TEST_BACKEND")
+    executable = os.environ.get("SHIFTBAR_TEST_BACKEND")
     if not executable:
-        pytest.skip("Set PATCH_GOBLINS_TEST_BACKEND to the compiled backend apphost")
+        pytest.skip("Set SHIFTBAR_TEST_BACKEND to the compiled backend apphost")
     engine = tmp_path / "synthetic_engine.py"
     engine.write_text('''import json, sys
 if sys.argv[1] == "config":
@@ -33,12 +33,12 @@ else:
 ''')
     env = dict(os.environ)
     for key in list(env):
-        if key.startswith(("ANTHROPIC_", "CLAUDE_", "HANDOFF_", "PATCH_GOBLINS_")):
+        if key.startswith(("ANTHROPIC_", "CLAUDE_", "HANDOFF_", "PATCH_GOBLINS_", "SHIFTBAR_")):
             env.pop(key)
     env.update({"HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
-                "PATCH_GOBLINS_DATA": str(tmp_path / "data"),
-                "PATCH_GOBLINS_ENGINE": sys.executable,
-                "PATCH_GOBLINS_ENGINE_ARGS": json.dumps([str(engine)])})
+                "SHIFTBAR_DATA": str(tmp_path / "data"),
+                "SHIFTBAR_ENGINE": sys.executable,
+                "SHIFTBAR_ENGINE_ARGS": json.dumps([str(engine)])})
     process = subprocess.Popen([executable, "--serve"], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, encoding="utf-8", env=env)

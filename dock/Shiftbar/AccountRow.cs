@@ -1,6 +1,6 @@
 using System.Drawing.Drawing2D;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// One account as a slim row: name, one meta line, a weekly pace line when the engine gives one, and two hairline meters.
 /// Clicking expands it (animated) to show every window, reset times and actions.

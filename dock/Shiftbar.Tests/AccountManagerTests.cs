@@ -1,8 +1,8 @@
 using System.Diagnostics;
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 // All accounts in this file are synthetic.
 
@@ -99,7 +99,7 @@ public class SummaryTests
     {
         var snap = new Snapshot(1, 2, [A(1, 34, 58), A(2, 92, 71, active: true, alias: "work"), A(3, 5, 12)]);
         Assert.Equal("2 of 3 have room · auto-switch\n● work 92% · 71%\nuser1 34% · 58%\nuser3 5% · 12%", Summary.Tooltip(snap, auto: true, line: 90));
-        Assert.Equal("Patch Goblins — no accounts yet", Summary.Tooltip(null, false));
+        Assert.Equal("Shiftbar — no accounts yet", Summary.Tooltip(null, false));
 
         var many = new Snapshot(1, 1, [.. Enumerable.Range(1, 12).Select(n => new Account(n, new string('x', 40) + n + "@example.com", n == 1, "ok",
             new Usage(new Window(10, null), new Window(20, null), null, null)))]);

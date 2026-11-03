@@ -35,15 +35,15 @@ classifiers = [
 menubar = ["rumps>=0.4.0"]
 
 [project.urls]
-Homepage = "https://github.com/trexchery/patch-goblins"
+Homepage = "https://github.com/trexchery/shiftbar"
 Upstream = "https://github.com/realiti4/claude-swap"
-Repository = "https://github.com/trexchery/patch-goblins"
-Issues = "https://github.com/trexchery/patch-goblins/issues"
+Repository = "https://github.com/trexchery/shiftbar"
+Issues = "https://github.com/trexchery/shiftbar/issues"
 
 [project.scripts]
 claude-swap = "claude_swap.cli:main"
 cswap = "claude_swap.cli:main"
-patch-goblins = "claude_swap.goblins:main"
+shiftbar = "claude_swap.shiftbar_mac:main"
 
 [build-system]
 requires = ["hatchling"]

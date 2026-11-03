@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 public sealed partial class TrayApp : ApplicationContext
 {
@@ -54,7 +54,7 @@ public sealed partial class TrayApp : ApplicationContext
             try { _ui.Post(_ => _ = OnLimitAsync(hit), null); }
             catch (Exception e) when (e is InvalidOperationException or ObjectDisposedException) { } // exiting: the UI is gone
         }, Program.Log);
-        _tray = new NotifyIcon { Icon = TrayIcons.App, Text = "Patch Goblins", Visible = true, ContextMenuStrip = _menu };
+        _tray = new NotifyIcon { Icon = TrayIcons.App, Text = "Shiftbar", Visible = true, ContextMenuStrip = _menu };
         _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ToggleDashboard(); };
         _menu.Opening += (_, _) => BuildMenu();
 
@@ -592,9 +592,9 @@ public sealed partial class TrayApp : ApplicationContext
                     await EnrollAsync(a);
                     return;
                 case "remove":
-                    if (MessageBox.Show($"Remove #{a.Number} {a.Email} from Patch Goblins?\n\nIts stored backup is deleted. " +
+                    if (MessageBox.Show($"Remove #{a.Number} {a.Email} from Shiftbar?\n\nIts stored backup is deleted. " +
                                         "Your current Claude Code login is not logged out.",
-                            "Patch Goblins", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                            "Shiftbar", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
                     await _engine.CommandWithInputAsync("y\n", "remove", a.Number.ToString());
                     break;
             }
@@ -613,7 +613,7 @@ public sealed partial class TrayApp : ApplicationContext
                 "3. If a code is shown, paste it into the console and press Enter. Nothing appears while you paste; that is normal.\n\n" +
                 "The console closes when done. Your password is only ever entered in the browser, never in the console.\n\n" +
                 "This uses a separate, temporary profile: your current login and running sessions are not affected.",
-                "Patch Goblins", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
+                "Shiftbar", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
         try
         {
             // First run: keep the login already on this machine as an account too.
@@ -645,8 +645,8 @@ public sealed partial class TrayApp : ApplicationContext
                 "• Automatic switches wait while a default-login session is open. Your terminals and workflows " +
                 "are never closed or reopened automatically. Manual account switches can change the login used by an open session.\n" +
                 "• Polling is conservative: the engine spaces out usage checks per account.\n\n" +
-                "Patch Goblins is an independent project, not affiliated with or endorsed by Anthropic.\n\nEnable auto-switch?",
-                "Patch Goblins — auto-switch", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes;
+                "Shiftbar is an independent project, not affiliated with or endorsed by Anthropic.\n\nEnable auto-switch?",
+                "Shiftbar — auto-switch", MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes;
             if (!ok) return;
             _settings.AutoSwitchPolicyAccepted = true;
         }
@@ -738,7 +738,7 @@ public sealed partial class TrayApp : ApplicationContext
     }
 
     static void Error(string title, Exception e) =>
-        MessageBox.Show(Engine.Redact(e.Message), "Patch Goblins — " + title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        MessageBox.Show(Engine.Redact(e.Message), "Shiftbar — " + title, MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
     protected override void ExitThreadCore()
     {

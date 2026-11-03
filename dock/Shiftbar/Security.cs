@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Security.AccessControl;
 using System.Security.Principal;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 public static class StoreSecurity
 {

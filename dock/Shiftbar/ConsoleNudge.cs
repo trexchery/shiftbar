@@ -4,9 +4,9 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Win32.SafeHandles;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
-/// `patch-goblins rc-nudge <pid> <session> [--manual]`: types `/remote-control` into a Claude Code window, only when that is
+/// `shiftbar rc-nudge <pid> <session> [--manual]`: types `/remote-control` into a Claude Code window, only when that is
 /// provably harmless, and prints one result line. Runs as its own short-lived process (the tray starts it), because attaching
 /// to another console is per process. Every doubt types nothing:
 /// 1. the window is idle and the user away (`RemoteControl.Ready`; `--manual`, the toast's button, skips only the away check);

@@ -1,7 +1,7 @@
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 /// The automatic switch line: 100% minus one long turn (10 min) at the account's burn over the last 15 minutes, 80–98%.
 public class SwitchLineTests

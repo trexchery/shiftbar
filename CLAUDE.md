@@ -1,6 +1,6 @@
-﻿# Patch Goblins
+﻿# Shiftbar
 
-Open-source Windows 11 tray application (Patch Goblins) built on claude-swap v0.27.2.
+Open-source Windows 11 tray application (Shiftbar) built on claude-swap v0.27.2.
 
 - Preserve the upstream MIT license and attribution.
 - Reuse the existing credential, quota, and switching engines.

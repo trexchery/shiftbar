@@ -1,10 +1,10 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text.Json;
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 // All credentials in this file are synthetic.
 
@@ -118,8 +118,8 @@ public class RedactionTests
     [InlineData("x -----BEGIN RSA PRIVATE KEY-----\nSYNTHETIC\n-----END RSA PRIVATE KEY----- y", "x [redacted] y")]
     [InlineData("x\n-----BEGIN OPENSSH PRIVATE KEY-----\nSYNTHETIC", "x\n[redacted]")]
     [InlineData("Switched to #2 b@example.com", "Switched to #2 b@example.com")]
-    [InlineData(@"Saved C:\Users\me\AppData\Local\patch-goblins\settings.json for a.b@example.com",
-        @"Saved C:\Users\me\AppData\Local\patch-goblins\settings.json for a.b@example.com")]
+    [InlineData(@"Saved C:\Users\me\AppData\Local\shiftbar\settings.json for a.b@example.com",
+        @"Saved C:\Users\me\AppData\Local\shiftbar\settings.json for a.b@example.com")]
     public void RedactsSecrets(string input, string expected) => Assert.Equal(expected, Engine.Redact(input));
 }
 
@@ -146,7 +146,7 @@ public class FormatTests
             new Usage(new Window(10, null), new Window(20, null), null, null));
         var tip = Summary.Tooltip(new Snapshot(1, 1, [acct]), auto: true);
         Assert.True(tip.Length <= 127);
-        Assert.Equal("Patch Goblins — no accounts yet", Summary.Tooltip(null, false));
+        Assert.Equal("Shiftbar — no accounts yet", Summary.Tooltip(null, false));
     }
 
     [Fact]
@@ -199,13 +199,13 @@ public class FormatTests
         Assert.Equal(args[3..], JsonSerializer.Deserialize<string[]>(line)!);
     }
 
-    /// Opt in with PATCH_GOBLINS_LAUNCH_SMOKE=<folder>: a real console opens (Windows Terminal where installed) exactly as
+    /// Opt in with SHIFTBAR_LAUNCH_SMOKE=<folder>: a real console opens (Windows Terminal where installed) exactly as
     /// the tray opens one, and the program inside writes what it received into that folder.
     [Fact]
     public void ARealConsoleLaunchCarriesEveryArgument()
     {
         var python = Engine.FindOnPath("python.exe");
-        if (Environment.GetEnvironmentVariable("PATCH_GOBLINS_LAUNCH_SMOKE") is not { Length: > 0 } dir || python == null) return;
+        if (Environment.GetEnvironmentVariable("SHIFTBAR_LAUNCH_SMOKE") is not { Length: > 0 } dir || python == null) return;
         var file = Path.Combine(dir, "launch-smoke.json");
         File.Delete(file);
         string[] args = ["run", "--", "it's \"quoted\"", "50% & more; `x` $y", "a b", "Ünïcödé · dot"];
@@ -559,14 +559,14 @@ public class LaunchTests
 }
 
 /// Drives the real engine end to end against a synthetic home directory.
-/// Set PATCH_GOBLINS_TEST_ENGINE to a cswap.exe (build.ps1 does); skipped otherwise.
+/// Set SHIFTBAR_TEST_ENGINE to a cswap.exe (build.ps1 does); skipped otherwise.
 [Collection("engine")]
 public class EngineIntegrationTests
 {
     [Fact]
     public async Task EnrollListSealRemove()
     {
-        var exe = Environment.GetEnvironmentVariable("PATCH_GOBLINS_TEST_ENGINE");
+        var exe = Environment.GetEnvironmentVariable("SHIFTBAR_TEST_ENGINE");
         if (string.IsNullOrEmpty(exe) || !File.Exists(exe)) return; // no engine build available
 
         using var home = new TempDir();

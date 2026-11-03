@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 /// The tray's and the macOS backend's unattended switch share one call. Where nothing follows the two logins of a held account
 /// (macOS) it stays `--exclusive`; elsewhere (Windows) it is not, and the engine's own follow keeps the logins together.

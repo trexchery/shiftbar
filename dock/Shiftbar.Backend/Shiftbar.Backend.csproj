@@ -4,23 +4,23 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>patch-goblins-backend</AssemblyName>
+    <AssemblyName>shiftbar-backend</AssemblyName>
     <Version>0.7.0</Version>
-    <Product>Patch Goblins</Product>
+    <Product>Shiftbar</Product>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../PatchGoblins/Engine.cs" Link="Shared/Engine.cs" />
-    <Compile Include="../PatchGoblins/Models.cs" Link="Shared/Models.cs" />
-    <Compile Include="../PatchGoblins/DockSettings.cs" Link="Shared/DockSettings.cs" />
-    <Compile Include="../PatchGoblins/Security.cs" Link="Shared/Security.cs" />
-    <Compile Include="../PatchGoblins/Projects.cs" Link="Shared/Projects.cs" />
-    <Compile Include="../PatchGoblins/Format.cs" Link="Shared/Format.cs" />
-    <Compile Include="../PatchGoblins/AutoPrime.cs" Link="Shared/AutoPrime.cs" />
-    <Compile Include="../PatchGoblins/SwitchLine.cs" Link="Shared/SwitchLine.cs" />
-    <Compile Include="../PatchGoblins/LimitWatch.cs" Link="Shared/LimitWatch.cs" />
-    <Compile Include="../PatchGoblins/ResumeStopped.cs" Link="Shared/ResumeStopped.cs" />
-    <Compile Include="../PatchGoblins/QuotaAlerts.cs" Link="Shared/QuotaAlerts.cs" />
-    <InternalsVisibleTo Include="PatchGoblins.Backend.Tests" />
+    <Compile Include="../Shiftbar/Engine.cs" Link="Shared/Engine.cs" />
+    <Compile Include="../Shiftbar/Models.cs" Link="Shared/Models.cs" />
+    <Compile Include="../Shiftbar/DockSettings.cs" Link="Shared/DockSettings.cs" />
+    <Compile Include="../Shiftbar/Security.cs" Link="Shared/Security.cs" />
+    <Compile Include="../Shiftbar/Projects.cs" Link="Shared/Projects.cs" />
+    <Compile Include="../Shiftbar/Format.cs" Link="Shared/Format.cs" />
+    <Compile Include="../Shiftbar/AutoPrime.cs" Link="Shared/AutoPrime.cs" />
+    <Compile Include="../Shiftbar/SwitchLine.cs" Link="Shared/SwitchLine.cs" />
+    <Compile Include="../Shiftbar/LimitWatch.cs" Link="Shared/LimitWatch.cs" />
+    <Compile Include="../Shiftbar/ResumeStopped.cs" Link="Shared/ResumeStopped.cs" />
+    <Compile Include="../Shiftbar/QuotaAlerts.cs" Link="Shared/QuotaAlerts.cs" />
+    <InternalsVisibleTo Include="Shiftbar.Backend.Tests" />
   </ItemGroup>
 </Project>

@@ -1,14 +1,14 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 // Auto-Prime: start an account's fresh 5-hour window early with one tiny request, so it also resets
-// early. Off by default: once on, Patch Goblins tracks the windows and primes each fresh one invisibly
+// early. Off by default: once on, Shiftbar tracks the windows and primes each fresh one invisibly
 // on its regular tick (a tray-menu click does it now). Turning it on doesn't settle whether Anthropic's
 // terms allow this use of a subscription (their Consumer Terms restrict automated access); the owner decides.
 
-/// What Patch Goblins keeps per account: diagnostics only, never the prompt or the reply.
+/// What Shiftbar keeps per account: diagnostics only, never the prompt or the reply.
 public sealed class PrimeRecord
 {
     /// The latest 5-hour reset seen in a live reading; the window after it is identified by it.
@@ -51,7 +51,7 @@ public sealed class Primer
     /// Keyed by email|organization: account numbers are reused after a remove.
     public Dictionary<string, PrimeRecord> Records { get; private set; }
 
-    /// Why nothing can be primed: without its ledger Patch Goblins could prime a window twice.
+    /// Why nothing can be primed: without its ledger Shiftbar could prime a window twice.
     public string? Problem { get; private set; }
 
     public DateTimeOffset? LastPrime => Records.Values.Where(r => r.Outcome is "sent" or "verified" or "unverified").Max(r => r.SentAt);

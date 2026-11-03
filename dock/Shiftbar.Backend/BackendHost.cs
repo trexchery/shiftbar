@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// JSON lines are private stdio between the native menu and the shared account upkeep.
 /// Requests run concurrently, so a long one (a prime) never blocks the input reader.

@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// A fresh usage-limit error as Claude Code wrote it, in any transcript of a config dir: the main loop's, a
 /// subagent's, a workflow agent's.

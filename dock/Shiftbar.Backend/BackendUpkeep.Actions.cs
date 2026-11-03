@@ -1,4 +1,4 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
 internal sealed partial class BackendUpkeep
 {

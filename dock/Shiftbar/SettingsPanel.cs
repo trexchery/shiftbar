@@ -1,4 +1,4 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// Dock preferences plus the engine's autoswitch.* keys (written via `cswap config set`), shown inside the flyout
 /// in place of the account list. The search box keeps only the rows whose name, hint or section match every word.
@@ -50,7 +50,7 @@ public sealed class SettingsPanel : UserControl
 
         var about = new Label
         {
-            Text = "Patch Goblins is an independent open-source project, not affiliated with or endorsed by Anthropic. " +
+            Text = "Shiftbar is an independent open-source project, not affiliated with or endorsed by Anthropic. " +
                    "Built on claude-swap by Onur Cetinkol (MIT).",
             Tag = "muted",
             Font = Ui.Font(7.5f),

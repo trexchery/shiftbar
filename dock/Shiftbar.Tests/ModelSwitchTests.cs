@@ -1,7 +1,7 @@
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 /// Per-window, model-aware moves: a window on Fable spends the account's general usage and its own Fable window, so it moves
 /// when either runs out, and only to an account with room in both; a window on another model never moves for Fable.

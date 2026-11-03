@@ -1,4 +1,4 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// "Continue on <account>": a window stopped at a limit carries on in a new terminal, in its folder, on an account with
 /// room, with the conversation resumed. The stopped window is never closed or killed; its owner closes it.

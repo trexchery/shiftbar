@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// A Claude Code window waiting for someone to type: stopped on a usage-limit error (`AtLimit`), or done
 /// with its turn. `Record` and `Seen` (the transcript's write time) let the move check nothing changed since.

@@ -3,11 +3,11 @@ using Xunit;
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 sealed class TempDir : IDisposable
 {
-    public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "patch-goblins-tests-" + Guid.NewGuid().ToString("N"));
+    public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "shiftbar-tests-" + Guid.NewGuid().ToString("N"));
     public TempDir() => Directory.CreateDirectory(Path);
     public void Dispose() { try { Directory.Delete(Path, recursive: true); } catch (IOException) { } }
 }

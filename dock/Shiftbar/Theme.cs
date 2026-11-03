@@ -2,7 +2,7 @@ using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// The one brand green: the tray's dots, buttons, switches and meters all read it.
 public static class Brand

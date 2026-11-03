@@ -1,4 +1,4 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
 public static class Format
 {

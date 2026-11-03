@@ -1,13 +1,13 @@
-# Builds the portable Patch Goblins bundle:
-#   dist\patch-goblins\patch-goblins.exe       tray app (self-contained .NET 8, single file)
-#   dist\patch-goblins\engine\cswap.exe   claude-swap engine (PyInstaller onedir)
-#   dist\patch-goblins-win-x64.zip
+# Builds the portable Shiftbar bundle:
+#   dist\shiftbar\shiftbar.exe       tray app (self-contained .NET 8, single file)
+#   dist\shiftbar\engine\cswap.exe   claude-swap engine (PyInstaller onedir)
+#   dist\shiftbar-win-x64.zip
 # Then runs the Python suite and the C# suite (including the end-to-end engine test).
 param([switch]$SkipTests)
 $ErrorActionPreference = 'Stop'
 $repo = Resolve-Path (Join-Path $PSScriptRoot '..')
 $dist = Join-Path $repo 'dist'
-$out = Join-Path $dist 'patch-goblins'
+$out = Join-Path $dist 'shiftbar'
 $work = Join-Path $repo 'build\pyinstaller'
 Push-Location $repo
 try {
@@ -23,7 +23,7 @@ try {
     if ($LASTEXITCODE) { throw 'PyInstaller failed' }
 
     Write-Host '== tray app (dotnet publish)'
-    dotnet publish dock\PatchGoblins\PatchGoblins.csproj -c Release -o $out --nologo
+    dotnet publish dock\Shiftbar\Shiftbar.csproj -c Release -o $out --nologo
     if ($LASTEXITCODE) { throw 'dotnet publish failed' }
     Remove-Item (Join-Path $out '*.pdb') -ErrorAction SilentlyContinue
     Copy-Item (Join-Path $work 'dist\cswap') (Join-Path $out 'engine') -Recurse
@@ -39,14 +39,14 @@ try {
         uv run pytest -q
         if ($LASTEXITCODE) { throw 'Python tests failed' }
         Write-Host '== tests (C#, with end-to-end engine test)'
-        $env:PATCH_GOBLINS_TEST_ENGINE = $engine
-        dotnet test dock\PatchGoblins.Tests\PatchGoblins.Tests.csproj --nologo
+        $env:SHIFTBAR_TEST_ENGINE = $engine
+        dotnet test dock\Shiftbar.Tests\Shiftbar.Tests.csproj --nologo
         if ($LASTEXITCODE) { throw 'C# tests failed' }
     }
 
-    $zip = Join-Path $dist 'patch-goblins-win-x64.zip'
+    $zip = Join-Path $dist 'shiftbar-win-x64.zip'
     if (Test-Path $zip) { Remove-Item $zip }
     Compress-Archive -Path $out -DestinationPath $zip
-    Write-Host "== done: $out\patch-goblins.exe  ($zip)"
+    Write-Host "== done: $out\shiftbar.exe  ($zip)"
 }
 finally { Pop-Location }

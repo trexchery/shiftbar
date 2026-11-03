@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, feat/windows-tray]
+    branches: [main]
     paths-ignore: ['**.md', 'assets/**', 'docs/**']
   pull_request: # every pull request: main requires these checks; `changes` skips them for docs-only ones
     branches: [main]
@@ -75,7 +75,7 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Build engine + Patch Goblins and run all tests (synthetic credentials only)
+      - name: Build engine + Shiftbar and run all tests (synthetic credentials only)
         shell: pwsh
         run: ./dock/build.ps1
 

@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// Remote Control (RC) across default-login switches. While RC is connected Claude Code appends `bridge-session` records
 /// (`ownerAccountUuid`: the login it connected as) to the session's transcript; nothing is written when it drops. A switch of

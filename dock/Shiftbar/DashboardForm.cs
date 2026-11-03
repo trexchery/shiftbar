@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// Tray flyout. Pinned, it becomes a movable window that stays on the desktop.
 public sealed class DashboardForm : Form
@@ -11,7 +11,7 @@ public sealed class DashboardForm : Form
     readonly Pill _pin, _close, _refresh, _best, _settingsIcon, _add;
     readonly ToolTip _tips = new();
     int? _expanded, _ring; // account numbers: one email can be two accounts (two orgs)
-    Icon? _goblin;
+    Icon? _appIcon;
     string _refreshed = "", _updated = "", _summary = "";
     bool _allSessions;
     (Snapshot? Snap, string? Error, IReadOnlyList<ProjectMapping>? Projects, IReadOnlyList<LiveSession>? Sessions, double Line) _last = (null, null, null, null, Summary.DefaultLine);
@@ -35,7 +35,7 @@ public sealed class DashboardForm : Form
 
     public DashboardForm()
     {
-        Text = "Patch Goblins";
+        Text = "Shiftbar";
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
@@ -48,8 +48,8 @@ public sealed class DashboardForm : Form
 
         // The header: the icon and the name with the actions beside them, and under them, full width, the cross-account summary.
         _header = new Panel { Dock = DockStyle.Top, Height = Ui.S(52) };
-        _header.Paint += (_, e) => e.Graphics.DrawIcon(_goblin ??= new Icon(TrayIcons.App, Ui.S(24), Ui.S(24)), new Rectangle(Ui.S(14), Ui.S(14), Ui.S(24), Ui.S(24)));
-        _title = new Label { Text = "Patch Goblins", Font = Ui.Font(9.5f, semibold: true), AutoSize = true, Location = new Point(Ui.S(46), Ui.S(9)) };
+        _header.Paint += (_, e) => e.Graphics.DrawIcon(_appIcon ??= new Icon(TrayIcons.App, Ui.S(24), Ui.S(24)), new Rectangle(Ui.S(14), Ui.S(14), Ui.S(24), Ui.S(24)));
+        _title = new Label { Text = "Shiftbar", Font = Ui.Font(9.5f, semibold: true), AutoSize = true, Location = new Point(Ui.S(46), Ui.S(9)) };
         _status = new Label
         {
             Font = Ui.Font(8f),
@@ -207,7 +207,7 @@ public sealed class DashboardForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _tips.Dispose(); _goblin?.Dispose(); }
+        if (disposing) { _tips.Dispose(); _appIcon?.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -373,7 +373,7 @@ public sealed class DashboardForm : Form
         ActiveControl = _list; // focus off the panel first: disposing the focused box would deactivate, and so hide, the flyout
         Controls.Remove(panel);
         panel.Dispose();
-        _title.Text = "Patch Goblins";
+        _title.Text = "Shiftbar";
         _list.Visible = _footer.Visible = true;
         SetWidth(Ui.S(AccountRow.BaseWidth + 16));
         FitHeight();

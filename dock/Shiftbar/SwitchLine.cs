@@ -1,4 +1,4 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// The automatic switch line: per account, how full it may get before a window (or the default login) moves off it.
 /// 100% minus what one long turn would spend at the account's recent burn rate, so a quiet account is used almost to the

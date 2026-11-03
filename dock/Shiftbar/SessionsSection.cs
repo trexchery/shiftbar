@@ -1,4 +1,4 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// The flyout's Sessions list: pure helpers for what each row says, plus the row itself.
 public static class Sessions

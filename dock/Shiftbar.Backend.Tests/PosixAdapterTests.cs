@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 public sealed class PosixAdapterTests
 {

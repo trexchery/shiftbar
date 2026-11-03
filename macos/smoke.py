@@ -9,24 +9,24 @@ import tempfile
 
 def main(app: Path) -> None:
     app = app.resolve()
-    executable = app / "Contents" / "MacOS" / "Patch Goblins"
+    executable = app / "Contents" / "MacOS" / "Shiftbar"
     engine = executable.with_name("cswap")
-    backend = app / "Contents" / "Resources" / "backend" / "patch-goblins-backend"
-    with tempfile.TemporaryDirectory(prefix="patch-goblins-smoke-") as directory:
+    backend = app / "Contents" / "Resources" / "backend" / "shiftbar-backend"
+    with tempfile.TemporaryDirectory(prefix="shiftbar-smoke-") as directory:
         root = Path(directory)
         env = {k: v for k, v in os.environ.items() if k not in (
             "GH_TOKEN", "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
             "CLAUDE_CONFIG_DIR", "RESOURCEPATH", "PYTHONPATH", "PYTHONHOME",
         )}
         env.update(HOME=str(root), USERPROFILE=str(root), XDG_DATA_HOME=str(root / "xdg"),
-                   CLAUDE_CONFIG_DIR=str(root / "claude"), PATCH_GOBLINS_DATA=str(root / "data"))
+                   CLAUDE_CONFIG_DIR=str(root / "claude"), SHIFTBAR_DATA=str(root / "data"))
         for command in ([engine, "--version"], [executable, "--engine", "--version"],
                         [backend, "--help"]):
             result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=30)
             if result.returncode:
                 raise RuntimeError(f"Frozen executable failed: {command[0].name}, exit {result.returncode}: {result.stderr}")
             print(result.stdout.strip())
-        env["PATCH_GOBLINS_SMOKE_HOME"] = str(root)
+        env["SHIFTBAR_SMOKE_HOME"] = str(root)
         result = subprocess.run([executable, "--native-smoke"], env=env, text=True,
                                 capture_output=True, timeout=40)
         marker = "Native menu bar, backend bridge and bundled credential engine: passed"

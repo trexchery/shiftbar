@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// Desktop scheduling only: quota, prime and stopped-window decisions remain in
 /// the same classes the Windows tray uses. The host calls this on its context.

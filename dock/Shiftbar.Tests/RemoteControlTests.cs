@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json;
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
-using static PatchGoblins.ConsoleNudge;
+using static Shiftbar.ConsoleNudge;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 /// Synthetic transcripts, shaped like Claude Code 2.1.317's: `bridge-session` while Remote Control is connected, a
 /// `bridge_status` system line when it (re)connects, nothing when it drops.
@@ -352,8 +352,8 @@ public class ConsoleNudgeIntegrationTests
 
     /// The tray's build of the helper: the copy beside the tests lacks its self-contained runtime.
     static string Helper => Path.Combine(AppContext.BaseDirectory.Replace(
-        $"{Path.DirectorySeparatorChar}PatchGoblins.Tests{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
-        $"{Path.DirectorySeparatorChar}PatchGoblins{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"), "patch-goblins.exe");
+        $"{Path.DirectorySeparatorChar}Shiftbar.Tests{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+        $"{Path.DirectorySeparatorChar}Shiftbar{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"), "shiftbar.exe");
 
     static async Task<(string Result, string? Received)> Run(string pre)
     {

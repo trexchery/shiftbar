@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// The desktop host supplies the same single-thread context as the Windows tray.
 internal static class Program
@@ -11,13 +11,13 @@ internal static class Program
         Console.OutputEncoding = new UTF8Encoding(false);
         if (args is ["--help"] or ["-h"])
         {
-            Console.WriteLine("Patch Goblins backend: --serve | --version");
+            Console.WriteLine("Shiftbar backend: --serve | --version");
             return 0;
         }
-        if (args is ["--version"]) { Console.WriteLine("Patch Goblins 0.7.0"); return 0; }
+        if (args is ["--version"]) { Console.WriteLine("Shiftbar 0.7.0"); return 0; }
         if (args is not ["--serve"])
         {
-            Console.Error.WriteLine("Usage: patch-goblins-backend --serve | --version");
+            Console.Error.WriteLine("Usage: shiftbar-backend --serve | --version");
             return 2;
         }
         try
@@ -47,7 +47,7 @@ internal static class Program
         try
         {
             Directory.CreateDirectory(DockSettings.Dir);
-            var path = Path.Combine(DockSettings.Dir, "patch-goblins.log");
+            var path = Path.Combine(DockSettings.Dir, "shiftbar.log");
             if (File.Exists(path) && new FileInfo(path).Length > 1_000_000) File.Delete(path);
             File.AppendAllText(path, $"{DateTimeOffset.Now:O} {Engine.Redact(message)}\n");
         }

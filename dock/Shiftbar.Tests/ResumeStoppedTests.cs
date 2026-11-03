@@ -1,7 +1,7 @@
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 [Collection("own process")] // stages windows under this process's pid: never alongside LimitWatchTests' own
 public class ResumeStoppedTests
@@ -229,7 +229,7 @@ public class ResumeStoppedTests
 
     static string LimitAt(DateTimeOffset t) => LimitV2.Replace("2026-10-20T22:33:03.355Z", t.ToString("O"));
 
-    static PatchGoblins.Limit LimitStop(DateTimeOffset? resets, DateTimeOffset at, string? window = "five_hour") => new(window, resets, at);
+    static Shiftbar.Limit LimitStop(DateTimeOffset? resets, DateTimeOffset at, string? window = "five_hour") => new(window, resets, at);
 
     [Fact]
     public void StructuredLimitErrorIsReadWithItsReset()
@@ -764,13 +764,13 @@ public class ResumeStoppedTests
     }
 }
 
-/// Read-only scan of this machine's real Claude windows; set PATCH_GOBLINS_LIVE_SCAN=1. Passes trivially otherwise.
+/// Read-only scan of this machine's real Claude windows; set SHIFTBAR_LIVE_SCAN=1. Passes trivially otherwise.
 public class ResumeStoppedLiveTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     [Fact]
     public void ScansRealWindows()
     {
-        if (Environment.GetEnvironmentVariable("PATCH_GOBLINS_LIVE_SCAN") != "1") return;
+        if (Environment.GetEnvironmentVariable("SHIFTBAR_LIVE_SCAN") != "1") return;
         var dirs = ResumeStopped.ConfigDirs(null);
         foreach (var d in dirs) output.WriteLine($"dir {d.Account} {d.Dir}");
         foreach (var s in ResumeStopped.Scan(dirs, DateTime.UtcNow)) output.WriteLine($"stopped {s.Pid} {s.SessionId} {s.Cwd} #{s.Account}");
@@ -789,7 +789,7 @@ public class ResumeStoppedLiveTests(Xunit.Abstractions.ITestOutputHelper output)
                 }
                 catch (Exception e) when (e is IOException or System.Text.Json.JsonException or KeyNotFoundException) { }
             }
-        foreach (var f in (Environment.GetEnvironmentVariable("PATCH_GOBLINS_LIVE_TRANSCRIPTS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var f in (Environment.GetEnvironmentVariable("SHIFTBAR_LIVE_TRANSCRIPTS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
             output.WriteLine($"atLimit={ResumeStopped.EndsAtLimit(File.ReadLines(f))} {Path.GetFileName(f)}");
     }
 }

@@ -3,7 +3,7 @@ using System.Text;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 public sealed record EngineResult(int ExitCode, string Stdout, string Stderr);
 
@@ -34,8 +34,8 @@ public sealed partial class Engine(string exe)
         }
         // No PATH fallback: an upstream claude-swap there lacks DPAPI sealing.
         throw new EngineException(
-            "Engine not found. Expected engine\\cswap.exe next to patch-goblins.exe; " +
-            "reinstall Patch Goblins (developers: set PATCH_GOBLINS_ENGINE).");
+            "Engine not found. Expected engine\\cswap.exe next to shiftbar.exe; " +
+            "reinstall Shiftbar (developers: set SHIFTBAR_ENGINE).");
     }
 
     internal static string? FindOnPath(string file) =>
@@ -231,7 +231,7 @@ public sealed partial class Engine(string exe)
         else if (shell == Cmd) psi.Arguments = $"{shellArgs[0]} \"{shellArgs[1]}\""; // cmd's own quoting: `/k "title … && …"`
         else foreach (var a in shellArgs) psi.ArgumentList.Add(a);
         psi.WorkingDirectory = workDir ?? StoreSecurity.UserProfile;
-        // A new terminal is a top-level session, even when Patch Goblins itself was started from inside one.
+        // A new terminal is a top-level session, even when Shiftbar itself was started from inside one.
         TopLevel(psi.Environment, FreshEnvironment);
         psi.Environment["NoDefaultCurrentDirectoryInExePath"] = "1";
         foreach (var (k, v) in env ?? new Dictionary<string, string>()) psi.Environment[k] = v;
@@ -245,7 +245,7 @@ public sealed partial class Engine(string exe)
     internal static IEnumerable<string> SessionMarkers(IEnumerable<string> names) =>
         names.Where(n => SessionMarker().IsMatch(n));
 
-    /// A terminal's environment. Started from inside a Claude Code session, Patch Goblins carries what that
+    /// A terminal's environment. Started from inside a Claude Code session, Shiftbar carries what that
     /// session set up for its own tools (NO_COLOR and AI_AGENT, so no colors; no git prompts or editor;
     /// its own prompt and encodings, …): then a terminal gets the environment Windows gives any new
     /// program of the signed-in user instead, as if opened from the Start menu. Either way, no session
@@ -258,8 +258,8 @@ public sealed partial class Engine(string exe)
                 || env.Any(v => v.Key.Equals("AI_AGENT", StringComparison.OrdinalIgnoreCase) && v.Value?.StartsWith("claude-code", StringComparison.OrdinalIgnoreCase) == true))
             && fresh() is { } clean)
         {
-            // Patch Goblins' own (an isolated instance's PATCH_GOBLINS_DATA) carry over: its terminals talk to it.
-            var own = env.Where(v => v.Key.StartsWith("PATCH_GOBLINS_", StringComparison.OrdinalIgnoreCase) || v.Key.StartsWith("HANDOFF_", StringComparison.OrdinalIgnoreCase)).ToList();
+            // Shiftbar's own (an isolated instance's SHIFTBAR_DATA) carry over: its terminals talk to it.
+            var own = env.Where(v => DockSettings.EnvPrefixes.Any(p => v.Key.StartsWith(p, StringComparison.OrdinalIgnoreCase))).ToList();
             env.Clear();
             foreach (var (k, v) in clean.Concat(own.Select(o => KeyValuePair.Create(o.Key, o.Value ?? "")))) env[k] = v;
         }
@@ -366,9 +366,10 @@ public sealed partial class Engine(string exe)
         var script = Path.Combine(dir, Guid.NewGuid().ToString("N") + ".command");
         var scriptText = new StringBuilder("#!/bin/zsh\n");
         scriptText.Append("cd -- ").Append(PosixQuote(cwd ?? StoreSecurity.UserProfile)).Append(" || exit\n");
-        foreach (var key in new[] { "PATH", "PATCH_GOBLINS_DATA", "PATCH_GOBLINS_ENGINE", "PATCH_GOBLINS_ENGINE_ARGS", "PATCH_GOBLINS_PYTHON", "PATCH_GOBLINS_PYTHON_ARGS", "PATCH_GOBLINS_APP_EXECUTABLE" })
-            if (Environment.GetEnvironmentVariable(key) is { } value)
-                scriptText.Append("export ").Append(key).Append('=').Append(PosixQuote(value)).Append('\n');
+        if (Environment.GetEnvironmentVariable("PATH") is { } path) scriptText.Append("export PATH=").Append(PosixQuote(path)).Append('\n');
+        foreach (var key in new[] { "DATA", "ENGINE", "ENGINE_ARGS", "PYTHON", "PYTHON_ARGS", "APP_EXECUTABLE" })
+            if (DockSettings.Env(key) is { } value) // a pre-rename PATCH_GOBLINS_/HANDOFF_ value carries over under the new name
+                scriptText.Append("export SHIFTBAR_").Append(key).Append('=').Append(PosixQuote(value)).Append('\n');
         foreach (var name in SessionMarkers(Environment.GetEnvironmentVariables().Keys.OfType<string>()))
             scriptText.Append("unset ").Append(name).Append('\n');
         foreach (var (key, value) in env ?? new Dictionary<string, string>())

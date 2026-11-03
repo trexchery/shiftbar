@@ -1,7 +1,7 @@
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 public sealed class BackendUpkeepDefaultsTests
 {
@@ -9,10 +9,10 @@ public sealed class BackendUpkeepDefaultsTests
     public async Task DefaultsNeverInvokeEngineOrTouchSessionsAndSavedThresholdIsRespected()
     {
         using var temp = new TempDir();
-        var before = Environment.GetEnvironmentVariable("PATCH_GOBLINS_DATA");
+        var before = Environment.GetEnvironmentVariable("SHIFTBAR_DATA");
         var models = ResumeStopped.Models;
         var context = SynchronizationContext.Current;
-        Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", temp.Path);
+        Environment.SetEnvironmentVariable("SHIFTBAR_DATA", temp.Path);
         SynchronizationContext.SetSynchronizationContext(new SynchronizationContext());
         try
         {
@@ -31,12 +31,12 @@ public sealed class BackendUpkeepDefaultsTests
             Assert.Equal(0, refreshes);
             Assert.False(File.Exists(Path.Combine(temp.Path, "prime.json")));
             Assert.False(File.Exists(Path.Combine(temp.Path, "resumed.json")));
-            Assert.False(File.Exists(Path.Combine(temp.Path, "patch-goblins.log")));
+            Assert.False(File.Exists(Path.Combine(temp.Path, "shiftbar.log")));
         }
         finally
         {
             ResumeStopped.Models = models;
-            Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", before);
+            Environment.SetEnvironmentVariable("SHIFTBAR_DATA", before);
             SynchronizationContext.SetSynchronizationContext(context);
         }
     }
@@ -45,9 +45,9 @@ public sealed class BackendUpkeepDefaultsTests
     public async Task QuotaOptInReusesCrossingPolicyAndStaleReadingsNeverResetIt()
     {
         using var temp = new TempDir();
-        var before = Environment.GetEnvironmentVariable("PATCH_GOBLINS_DATA");
+        var before = Environment.GetEnvironmentVariable("SHIFTBAR_DATA");
         var context = SynchronizationContext.Current;
-        Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", temp.Path);
+        Environment.SetEnvironmentVariable("SHIFTBAR_DATA", temp.Path);
         SynchronizationContext.SetSynchronizationContext(new SynchronizationContext());
         try
         {
@@ -71,7 +71,7 @@ public sealed class BackendUpkeepDefaultsTests
         }
         finally
         {
-            Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", before);
+            Environment.SetEnvironmentVariable("SHIFTBAR_DATA", before);
             SynchronizationContext.SetSynchronizationContext(context);
         }
     }

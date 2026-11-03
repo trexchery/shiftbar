@@ -1,4 +1,4 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// The live sessions: the flyout's Sessions list, the notice when one stops at a limit, and "Continue on <account>".
 public sealed partial class TrayApp

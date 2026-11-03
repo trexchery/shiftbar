@@ -1,4 +1,4 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
 public enum QuotaState { Normal, Near, Exhausted }
 

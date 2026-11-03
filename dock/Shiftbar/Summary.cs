@@ -1,4 +1,4 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
 /// The cross-account view the flyout header, the "Use best" action, the rows' pace hints and the tray tooltip read.
 /// Pure: everything comes from the engine's `list --json` reading.
@@ -80,7 +80,7 @@ public static class Summary
     public static string Tooltip(Snapshot? s, bool auto, double line = DefaultLine)
     {
         const int Max = 127;
-        if (s is not { Accounts.Count: > 0 }) return "Patch Goblins — no accounts yet";
+        if (s is not { Accounts.Count: > 0 }) return "Shiftbar — no accounts yet";
         var unknown = Unknown(s.Accounts);
         var head = $"{s.Accounts.Count(a => HasRoom(a, line))} of {s.Accounts.Count} have room" + (unknown > 0 ? $" · {unknown} unknown" : "") + (auto ? " · auto-switch" : "");
         var rows = s.Accounts.OrderByDescending(a => a.Active).ThenBy(a => a.Number).ToList();

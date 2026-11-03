@@ -1,7 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 
-namespace PatchGoblins;
+namespace Shiftbar;
 
 public static class TrayIcons
 {

@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\PatchGoblins\PatchGoblins.csproj" />
+    <ProjectReference Include="..\Shiftbar\Shiftbar.csproj" />
   </ItemGroup>
 
 </Project>

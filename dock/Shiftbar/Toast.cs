@@ -1,6 +1,6 @@
-namespace PatchGoblins;
+namespace Shiftbar;
 
-/// Patch Goblins' notice: a small rounded card at the bottom right of the screen, in place of Windows' balloon. It never
+/// Shiftbar's notice: a small rounded card at the bottom right of the screen, in place of Windows' balloon. It never
 /// takes focus, rises in, stays while hovered, fades out after a few seconds, and opens the flyout when clicked.
 /// Several stack upward; at most three at a time, the oldest going first. An optional action adds one primary button:
 /// clicking it runs the action and dismisses the card. The card never takes focus, so every action must also be reachable
@@ -16,7 +16,7 @@ public sealed class Toast : Form
     readonly Action? _click;
     internal readonly Pill? ActionButton;
     long _shownAt, _fadeFrom = -1;
-    Icon? _goblin;
+    Icon? _appIcon;
 
     public static void Show(string title, string text, Color? accent = null, Action? click = null, (string Label, Action Run)? action = null)
     {
@@ -111,7 +111,7 @@ public sealed class Toast : Form
         var g = e.Graphics;
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         using (var bar = new SolidBrush(_accent)) g.FillRectangle(bar, 0, 0, Ui.S(4), Height);
-        g.DrawIcon(_goblin ??= new Icon(TrayIcons.App, Ui.S(24), Ui.S(24)), new Rectangle(Ui.S(16), Ui.S(12), Ui.S(24), Ui.S(24)));
+        g.DrawIcon(_appIcon ??= new Icon(TrayIcons.App, Ui.S(24), Ui.S(24)), new Rectangle(Ui.S(16), Ui.S(12), Ui.S(24), Ui.S(24)));
         using var titleFont = Ui.Font(9f, semibold: true);
         using var textFont = Ui.Font(8.5f);
         TextRenderer.DrawText(g, _title, titleFont, new Rectangle(Ui.S(52), Ui.S(10), Width - Ui.S(64), Ui.S(20)), pal.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
@@ -129,7 +129,7 @@ public sealed class Toast : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _tick.Dispose(); _goblin?.Dispose(); }
+        if (disposing) { _tick.Dispose(); _appIcon?.Dispose(); }
         base.Dispose(disposing);
     }
 }

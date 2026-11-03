@@ -8,10 +8,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>dock.ico</ApplicationIcon>
-    <AssemblyName>patch-goblins</AssemblyName>
-    <Version>0.6.1</Version>
-    <Product>Patch Goblins</Product>
-    <Copyright>Patch Goblins contributors; engine (c) Onur Cetinkol, MIT</Copyright>
+    <AssemblyName>shiftbar</AssemblyName>
+    <Version>0.7.0</Version>
+    <Product>Shiftbar</Product>
+    <Copyright>Shiftbar contributors; engine (c) Onur Cetinkol, MIT</Copyright>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="dock.ico" LogicalName="dock.ico" />
-    <InternalsVisibleTo Include="PatchGoblins.Tests" />
+    <InternalsVisibleTo Include="Shiftbar.Tests" />
   </ItemGroup>
 
 </Project>

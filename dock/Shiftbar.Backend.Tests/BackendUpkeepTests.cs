@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
-using PatchGoblins;
+using Shiftbar;
 using Xunit;
 
-namespace PatchGoblins.Tests;
+namespace Shiftbar.Tests;
 
 public sealed class BackendUpkeepTests
 {
@@ -15,10 +15,10 @@ public sealed class BackendUpkeepTests
         using var loop = new Loop();
         var oldHome = Environment.GetEnvironmentVariable("HOME");
         var oldXdg = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
-        var oldData = Environment.GetEnvironmentVariable("PATCH_GOBLINS_DATA");
+        var oldData = Environment.GetEnvironmentVariable("SHIFTBAR_DATA");
         Environment.SetEnvironmentVariable("HOME", tmp.Path);
         Environment.SetEnvironmentVariable("XDG_DATA_HOME", Path.Combine(tmp.Path, "xdg"));
-        Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", Path.Combine(tmp.Path, "desktop"));
+        Environment.SetEnvironmentVariable("SHIFTBAR_DATA", Path.Combine(tmp.Path, "desktop"));
         using var child = Process.Start(new ProcessStartInfo("/bin/sh", ["-c", "sleep 60"]) { UseShellExecute = false })!;
         try
         {
@@ -73,7 +73,7 @@ public sealed class BackendUpkeepTests
             await child.WaitForExitAsync();
             Environment.SetEnvironmentVariable("HOME", oldHome);
             Environment.SetEnvironmentVariable("XDG_DATA_HOME", oldXdg);
-            Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", oldData);
+            Environment.SetEnvironmentVariable("SHIFTBAR_DATA", oldData);
         }
     }
 

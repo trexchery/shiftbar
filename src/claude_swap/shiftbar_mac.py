@@ -1,4 +1,4 @@
-"""Patch Goblins' macOS shell; all account policy stays upstream.
+"""Shiftbar's macOS shell; all account policy stays upstream.
 
 The menu bar owns the .NET backend, which hosts auto-switch, quota alerts and
 Auto-Prime with the same code as the Windows tray. Credentials are passed only
@@ -20,6 +20,19 @@ import time
 
 from claude_swap.exceptions import ClaudeSwitchError
 
+# Newest first, as the backend reads them (DockSettings.Env): a pre-rename PATCH_GOBLINS_/HANDOFF_ variable still works.
+ENV_PREFIXES = ("SHIFTBAR_", "PATCH_GOBLINS_", "HANDOFF_")
+LOGIN_LABEL = "com.shiftbar.app"
+# Pre-rename login items: the shared backend's label, then the menu bar's own.
+_OLD_LOGIN_LABELS = ("com.patchgoblins.app", "com.patch-goblins.menubar")
+
+
+def env_value(name: str) -> str | None:
+    for prefix in ENV_PREFIXES:
+        if value := os.environ.get(prefix + name):
+            return value
+    return None
+
 
 def resources() -> Path:
     if os.environ.get("RESOURCEPATH"):
@@ -30,21 +43,21 @@ def resources() -> Path:
 
 
 def backend_command() -> list[str]:
-    override = os.environ.get("PATCH_GOBLINS_BACKEND")
+    override = env_value("BACKEND")
     if override:
         return [override]
     root = resources()
-    names = [root / "backend" / "patch-goblins-backend",
-             root / "build" / "macos" / "backend" / "patch-goblins-backend",
-             root / "dock" / "PatchGoblins.Backend" / "bin" / "Release" / "net8.0" / "patch-goblins-backend",
-             root / "dock" / "PatchGoblins.Backend" / "bin" / "Debug" / "net8.0" / "patch-goblins-backend"]
+    names = [root / "backend" / "shiftbar-backend",
+             root / "build" / "macos" / "backend" / "shiftbar-backend",
+             root / "dock" / "Shiftbar.Backend" / "bin" / "Release" / "net8.0" / "shiftbar-backend",
+             root / "dock" / "Shiftbar.Backend" / "bin" / "Debug" / "net8.0" / "shiftbar-backend"]
     for candidate in names:
         if candidate.is_file():
             return [str(candidate)]
-    found = shutil.which("patch-goblins-backend")
+    found = shutil.which("shiftbar-backend")
     if found:
         return [found]
-    raise ClaudeSwitchError("Patch Goblins backend is missing. Install the complete .app or run macos/build-macos.sh.")
+    raise ClaudeSwitchError("Shiftbar backend is missing. Install the complete .app or run macos/build-macos.sh.")
 
 
 def child_environment() -> dict[str, str]:
@@ -53,16 +66,16 @@ def child_environment() -> dict[str, str]:
     dirs = [str(Path.home() / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
     env["PATH"] = os.pathsep.join(dict.fromkeys([*dirs, *env.get("PATH", "").split(os.pathsep)]))
     if getattr(sys, "frozen", False):
-        env.setdefault("PATCH_GOBLINS_PYTHON", sys.executable)
-        env.setdefault("PATCH_GOBLINS_PYTHON_ARGS", json.dumps(["--python-dispatch"]))
+        env.setdefault("SHIFTBAR_PYTHON", sys.executable)
+        env.setdefault("SHIFTBAR_PYTHON_ARGS", json.dumps(["--python-dispatch"]))
         engine = Path(sys.executable).parent / "cswap"
         if not engine.is_file():
             engine = resources() / "engine" / "cswap"
         if engine.is_file():
-            env.setdefault("PATCH_GOBLINS_ENGINE", str(engine))
+            env.setdefault("SHIFTBAR_ENGINE", str(engine))
         else:
-            env.setdefault("PATCH_GOBLINS_ENGINE", sys.executable)
-            env.setdefault("PATCH_GOBLINS_ENGINE_ARGS", json.dumps(["--engine"]))
+            env.setdefault("SHIFTBAR_ENGINE", sys.executable)
+            env.setdefault("SHIFTBAR_ENGINE_ARGS", json.dumps(["--engine"]))
     return env
 
 
@@ -82,7 +95,7 @@ class BackendClient:
         self.process = subprocess.Popen(self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
                                         bufsize=1, env=self.env)
-        threading.Thread(target=self._read, daemon=True, name="goblins-backend-reader").start()
+        threading.Thread(target=self._read, daemon=True, name="shiftbar-backend-reader").start()
 
     def _read(self):
         try:
@@ -103,7 +116,7 @@ class BackendClient:
         finally:
             with self._lock:
                 for pending in self._pending.values():
-                    pending.put({"error": {"message": "The Patch Goblins backend stopped."}})
+                    pending.put({"error": {"message": "The Shiftbar backend stopped."}})
             if not self._closed:
                 self.events.put({"event": "stopped"})
 
@@ -111,7 +124,7 @@ class BackendClient:
         result_queue: queue.Queue = queue.Queue(maxsize=2)
         with self._lock:
             if self.process is None or self.process.poll() is not None:
-                raise ClaudeSwitchError("The backend is not running. Relaunch Patch Goblins.")
+                raise ClaudeSwitchError("The backend is not running. Relaunch Shiftbar.")
             self._serial += 1
             serial = self._serial
             self._pending[serial] = result_queue
@@ -157,7 +170,7 @@ def run_terminal(argv: list[str], *, cwd: str | None = None) -> Path:
     """Open an argv-safe private command file in the user's macOS Terminal."""
     if sys.platform != "darwin":
         raise ClaudeSwitchError("Opening Terminal is available on macOS only.")
-    root = Path.home() / "Library" / "Application Support" / "Patch Goblins" / "terminal"
+    root = Path.home() / "Library" / "Application Support" / "shiftbar" / "terminal"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     import uuid
     path = root / ("session-" + uuid.uuid4().hex + ".command")
@@ -167,9 +180,11 @@ def run_terminal(argv: list[str], *, cwd: str | None = None) -> Path:
     if cwd:
         lines.append("cd -- " + shlex.quote(str(Path(cwd).expanduser().resolve())))
     env = child_environment()
-    for key in ("PATH", "PATCH_GOBLINS_BACKEND", "PATCH_GOBLINS_ENGINE", "PATCH_GOBLINS_ENGINE_ARGS", "PATCH_GOBLINS_PYTHON", "PATCH_GOBLINS_PYTHON_ARGS", "PATCH_GOBLINS_DATA"):
-        if key in env:
-            lines.append("export " + key + "=" + shlex.quote(env[key]))
+    lines.append("export PATH=" + shlex.quote(env["PATH"]))
+    for name in ("BACKEND", "ENGINE", "ENGINE_ARGS", "PYTHON", "PYTHON_ARGS", "DATA"):
+        value = env.get("SHIFTBAR_" + name) or env_value(name)
+        if value:
+            lines.append("export SHIFTBAR_" + name + "=" + shlex.quote(value))
     lines.append("exec " + shlex.join(argv))
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
@@ -181,7 +196,7 @@ def run_terminal(argv: list[str], *, cwd: str | None = None) -> Path:
 def app_command(*args: str) -> list[str]:
     if getattr(sys, "frozen", False):
         return [sys.executable, *args]
-    return [sys.executable, "-m", "claude_swap.goblins", *args]
+    return [sys.executable, "-m", "claude_swap.shiftbar_mac", *args]
 
 
 def add_account() -> str:
@@ -194,7 +209,7 @@ def add_account() -> str:
     claude = shutil.which("claude", path=env["PATH"])
     if not claude:
         raise ClaudeSwitchError("Install Claude Code before adding an account.")
-    with tempfile.TemporaryDirectory(prefix="patch-goblins-login-") as temp:
+    with tempfile.TemporaryDirectory(prefix="shiftbar-login-") as temp:
         profile = Path(temp)
         for name in AUTH_OVERRIDE_ENV_VARS:
             env.pop(name, None)
@@ -264,16 +279,16 @@ class MenuExtension:
             event = message.get("event")
             if event == "notify":
                 if not self.native_smoke:
-                    rumps.notification("Patch Goblins", message.get("title", ""), message.get("body", ""))
+                    rumps.notification("Shiftbar", message.get("title", ""), message.get("body", ""))
             elif event == "ui_error":
                 if self.native_smoke:
                     self._finish_smoke(app, False)
                     return
-                rumps.alert(title="Patch Goblins", message=message["message"])
+                rumps.alert(title="Shiftbar", message=message["message"])
             elif event == "stopped":
                 self._stopped = True
                 self._restart_at = time.monotonic() + 3
-                rumps.notification("Patch Goblins", "Backend stopped", "Auto-switch and quota alerts pause until it restarts.")
+                rumps.notification("Shiftbar", "Backend stopped", "Auto-switch and quota alerts pause until it restarts.")
                 app.rebuild_menu()
             elif event in ("changed", "ready"):
                 self._refresh()
@@ -329,7 +344,7 @@ class MenuExtension:
         return panel.URL().path() if panel.runModal() == AppKit.NSModalResponseOK else None
 
     def menu(self, app, rumps):
-        tools = rumps.MenuItem("Patch Goblins" + (" (stopped)" if self._stopped else ""))
+        tools = rumps.MenuItem("Shiftbar" + (" (stopped)" if self._stopped else ""))
         if self._stopped:
             tools.add(rumps.MenuItem("Restart backend", callback=lambda _: self._guard(self.restart)))
         tools.add(rumps.MenuItem("Open account dashboard", callback=lambda _: self._guard(lambda: run_terminal(app_command("--accounts")))))
@@ -343,7 +358,7 @@ class MenuExtension:
         tools.add(self._desktop_settings(rumps))
         login = rumps.MenuItem("Launch at login", callback=lambda _: self._guard(self.toggle_login))
         from claude_swap.launch_agent import plist_path
-        login.state = int(plist_path("com.patch-goblins.menubar").exists())
+        login.state = int(plist_path(LOGIN_LABEL).exists())
         tools.add(login)
         return [tools, None]
 
@@ -449,12 +464,12 @@ class MenuExtension:
         try:
             fn()
         except (ClaudeSwitchError, OSError, subprocess.SubprocessError) as exc:
-            rumps.alert(title="Patch Goblins", message=str(exc))
+            rumps.alert(title="Shiftbar", message=str(exc))
 
     @staticmethod
     def toggle_login():
         from claude_swap import launch_agent
-        label = "com.patch-goblins.menubar"
+        label = LOGIN_LABEL
         if launch_agent.plist_path(label).exists():
             # Do not boot out our own current process from a menu callback.
             launch_agent.plist_path(label).unlink()
@@ -471,6 +486,61 @@ class MenuExtension:
         self.client.close()
 
 
+def _old_app_running(old_data: Path) -> bool:
+    """Patch Goblins still runs: its menu bar process, or its backend, which holds backend.lock exclusively (flock)."""
+    if subprocess.run(["pgrep", "-x", "Patch Goblins"], capture_output=True, check=False).returncode == 0:
+        return True
+    lock = old_data / "backend.lock"
+    if not lock.is_file():
+        return False
+    import fcntl
+    with open(lock, "rb") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+    return False
+
+
+def migrate_from_patch_goblins(home: Path | None = None, running=_old_app_running) -> None:
+    """One-time carry-over from the pre-rename Patch Goblins: its data folder and its login item.
+
+    Raises while it still runs: two menu bars must never manage the same accounts. Engine data
+    (~/.claude-swap-backup, the Keychain service) never moved and is not touched.
+    """
+    if env_value("DATA"):
+        return  # an isolated instance
+    from claude_swap.launch_agent import build_plist, log_paths, plist_path
+    home = home or Path.home()
+    support = home / "Library" / "Application Support"
+    old, new = support / "patch-goblins", support / "shiftbar"
+    old_agents = [path for path in (plist_path(label, home) for label in _OLD_LOGIN_LABELS) if path.exists()]
+    if not old.is_dir() and not old_agents:
+        return
+    if running(old):
+        raise ClaudeSwitchError("The old Patch Goblins app is still running. Quit it (menu bar, Quit), "
+                                "then open Shiftbar again: it carries over your settings.")
+    if old.is_dir() and not new.exists():
+        old.rename(new)
+    elif old.is_dir():
+        # A Shiftbar folder that already exists (a log from an earlier start, say) keeps its entries; the rest move in.
+        for entry in old.iterdir():
+            if not (new / entry.name).exists():
+                try:
+                    entry.rename(new / entry.name)
+                except OSError:
+                    pass  # one locked entry stays behind; the rest move
+        if not any(old.iterdir()):
+            old.rmdir()
+    if old_agents:
+        for path in old_agents:
+            path.unlink(missing_ok=True)
+        target = plist_path(LOGIN_LABEL, home)
+        if not target.exists():  # launch at login was on: it stays on under the new label
+            log_paths(LOGIN_LABEL, home)[0].parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(build_plist(app_command(), LOGIN_LABEL, home))
+
+
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--engine", "--python-dispatch"):
@@ -479,7 +549,7 @@ def main(argv=None):
         sys.argv = ["cswap", *args]
         engine_main()
         return
-    parser = argparse.ArgumentParser(prog="patch-goblins")
+    parser = argparse.ArgumentParser(prog="shiftbar")
     parser.add_argument("mode", nargs="?", choices=["menubar"], default="menubar")
     parser.add_argument("--accounts", action="store_true", help="Open the existing account dashboard")
     parser.add_argument("--add-account", action="store_true", help="Sign in through the official Claude CLI in an isolated profile")
@@ -492,31 +562,32 @@ def main(argv=None):
             from claude_swap.switcher import ClaudeAccountSwitcher
             from claude_swap.tui.app import CswapApp
             app = CswapApp(ClaudeAccountSwitcher())
-            app.TITLE = "Patch Goblins · accounts"
+            app.TITLE = "Shiftbar · accounts"
             app.run()
         else:
             if sys.platform != "darwin":
                 raise ClaudeSwitchError("The native menu bar is available on macOS only. Use --accounts for the account dashboard.")
             from claude_swap import menubar
             from claude_swap.switcher import ClaudeAccountSwitcher
-            icon = resources() / "goblin.png"
+            icon = resources() / "shiftbar.png"
             if options.native_smoke:
-                smoke_home = os.environ.get("PATCH_GOBLINS_SMOKE_HOME")
-                smoke_data = os.environ.get("PATCH_GOBLINS_DATA")
+                smoke_home = env_value("SMOKE_HOME")
+                smoke_data = env_value("DATA")
                 if not smoke_home or not smoke_data or Path(smoke_home).resolve() != Path.home().resolve() or not Path(smoke_data).resolve().is_relative_to(Path(smoke_home).resolve()):
-                    raise ClaudeSwitchError("Native smoke requires an explicitly isolated HOME and PATCH_GOBLINS_DATA.")
+                    raise ClaudeSwitchError("Native smoke requires an explicitly isolated HOME and SHIFTBAR_DATA.")
                 profile = Path(smoke_home) / "claude-smoke"
                 profile.mkdir(mode=0o700, exist_ok=True)
                 os.environ["CLAUDE_CONFIG_DIR"] = str(profile)
                 os.environ["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = str(profile)
+            migrate_from_patch_goblins()  # after the smoke guard: an isolated (smoke) instance never migrates
             extension = MenuExtension(native_smoke=options.native_smoke)
-            menubar.run(ClaudeAccountSwitcher(), extension=extension, app_name="Patch Goblins", icon=icon if icon.is_file() else None)
+            menubar.run(ClaudeAccountSwitcher(), extension=extension, app_name="Shiftbar", icon=icon if icon.is_file() else None)
             if options.native_smoke:
                 if not extension.smoke_passed:
                     raise ClaudeSwitchError("Native menu/backend smoke did not obtain an account snapshot.")
                 print("Native menu bar, backend bridge and bundled credential engine: passed")
     except (ClaudeSwitchError, OSError) as exc:
-        print(f"Patch Goblins: {exc}", file=sys.stderr)
+        print(f"Shiftbar: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
 
 
