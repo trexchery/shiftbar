@@ -2,7 +2,7 @@ using System.Drawing.Drawing2D;
 
 namespace PatchGoblins;
 
-/// One account as a slim row: name, one meta line, two hairline meters, and (for a goblin on the team) its job line.
+/// One account as a slim row: name, one meta line and two hairline meters.
 /// Clicking expands it (animated) to show every window, reset times and actions.
 public sealed class AccountRow : Control
 {
@@ -18,7 +18,6 @@ public sealed class AccountRow : Control
     readonly DateTimeOffset _now;
     readonly List<(string Label, Window W, string? Extra)> _windows = [];
     readonly string? _note;
-    readonly Job? _job; // null: a visitor (Codex, Grok), or nothing to say
     readonly IReadOnlyList<ProjectMapping> _projects;
     readonly string? _projectsLine; // only when every leaf name fits on one line; the context menu always lists them
     readonly ToolTip _tip = new();
@@ -32,14 +31,13 @@ public sealed class AccountRow : Control
     public Account Account => _a;
     public bool Expanded => _target > 0.5f;
 
-    int Collapsed => Ui.S(_job != null ? 68 : 52);
+    int Collapsed => Ui.S(52);
 
-    public AccountRow(Account a, DateTimeOffset now, IReadOnlyList<ProjectMapping>? projects = null, Job? job = null)
+    public AccountRow(Account a, DateTimeOffset now, IReadOnlyList<ProjectMapping>? projects = null)
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         _a = a;
         _now = now;
-        _job = job;
         Width = Ui.S(BaseWidth);
         Height = Collapsed;
         Margin = new Padding(0, 0, 0, Ui.S(2));
@@ -139,30 +137,23 @@ public sealed class AccountRow : Control
         var menu = new ContextMenuStrip();
         if (!_a.Active) menu.Items.Add("Switch to this account", null, (_, _) => SwitchClicked?.Invoke(_a));
         menu.Items.Add("Open terminal", null, (_, _) => TerminalClicked?.Invoke(_a));
-        var cont = new ToolStripMenuItem("Continue in");
-        foreach (var t in ProviderCli.HandoffTargets(_a.Provider))
-            cont.DropDownItems.Add(ProviderCli.Title(t) + "…", null, (_, _) => MenuAction?.Invoke(_a, "continue:" + t));
-        if (cont.HasDropDownItems) menu.Items.Add(cont);
-        menu.Items.Add(new ToolStripSeparator());
-        if (_a.Provider == "claude") // folder pins, auto-switch and aliases are Claude-engine features
+        menu.Items.Add("Assign project folder…", null, (_, _) => MenuAction?.Invoke(_a, "map"));
+        if (_projects.Count > 0)
         {
-            menu.Items.Insert(menu.Items.Count - 1, new ToolStripMenuItem("Assign project folder…", null, (_, _) => MenuAction?.Invoke(_a, "map")));
-            if (_projects.Count > 0)
+            var proj = new ToolStripMenuItem("Projects");
+            foreach (var p in _projects)
             {
-                var proj = new ToolStripMenuItem("Projects");
-                foreach (var p in _projects)
-                {
-                    var folder = new ToolStripMenuItem(p.Leaf) { ToolTipText = p.Folder };
-                    folder.DropDownItems.Add("Open terminal", null, (_, _) => MenuAction?.Invoke(_a, "project-open:" + p.Folder));
-                    folder.DropDownItems.Add("Remove", null, (_, _) => MenuAction?.Invoke(_a, "project-remove:" + p.Folder));
-                    proj.DropDownItems.Add(folder);
-                }
-                menu.Items.Insert(menu.Items.Count - 1, proj);
+                var folder = new ToolStripMenuItem(p.Leaf) { ToolTipText = p.Folder };
+                folder.DropDownItems.Add("Open terminal", null, (_, _) => MenuAction?.Invoke(_a, "project-open:" + p.Folder));
+                folder.DropDownItems.Add("Remove", null, (_, _) => MenuAction?.Invoke(_a, "project-remove:" + p.Folder));
+                proj.DropDownItems.Add(folder);
             }
-            menu.Items.Add(_a.Disabled ? "Include in auto-switch" : "Exclude from auto-switch", null,
-                (_, _) => MenuAction?.Invoke(_a, _a.Disabled ? "enable" : "disable"));
-            menu.Items.Add("Rename…", null, (_, _) => MenuAction?.Invoke(_a, "alias"));
+            menu.Items.Add(proj);
         }
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_a.Disabled ? "Include in auto-switch" : "Exclude from auto-switch", null,
+            (_, _) => MenuAction?.Invoke(_a, _a.Disabled ? "enable" : "disable"));
+        menu.Items.Add("Rename…", null, (_, _) => MenuAction?.Invoke(_a, "alias"));
         menu.Items.Add("Log in again…", null, (_, _) => MenuAction?.Invoke(_a, "reenroll"));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Remove…", null, (_, _) => MenuAction?.Invoke(_a, "remove"));
@@ -187,9 +178,9 @@ public sealed class AccountRow : Control
             g.FillPath(bg, path);
         }
 
-        // Identity: name, meta line, and the job line with its dot. A visitor has no job, so its active dot stays on the name.
+        // Identity: name and meta line, the active account's dot beside them.
         int x = pad + Ui.S(14);
-        if (_a.Active && _job == null)
+        if (_a.Active)
         {
             using var dot = new SolidBrush(pal.Live);
             float d = Ui.S(6);
@@ -198,26 +189,14 @@ public sealed class AccountRow : Control
         var nameWidth = Width - x - Ui.S(150);
         var name = string.IsNullOrEmpty(_a.Alias) ? _a.Email : _a.Alias;
         var flags = TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine;
-        int nameY = Ui.S(_job != null ? 8 : 9), metaY = Ui.S(_job != null ? 25 : 28);
-        var dim = _a.Disabled || _a.Provider != "claude"; // visitors read quieter than the team
-        TextRenderer.DrawText(g, name, NameFont, new Rectangle(x, nameY, nameWidth, NameFont.Height), dim ? pal.Muted : pal.Text, flags);
-        TextRenderer.DrawText(g, Meta(), MetaFont, new Rectangle(x, metaY, nameWidth, MetaFont.Height), pal.Muted, flags);
-        if (_job is { } job)
-        {
-            using var dot = new SolidBrush(job.Kind switch { JobKind.Working or JobKind.Yours => pal.Live, JobKind.Resting => Palette.Warn, _ => pal.Faint });
-            float d = Ui.S(6);
-            g.FillEllipse(dot, pad, Ui.S(46) + (MetaFont.Height - d) / 2f, d, d);
-            TextRenderer.DrawText(g, job.Text, MetaFont, new Rectangle(x, Ui.S(46), right - x, MetaFont.Height),
-                job.Kind == JobKind.Working ? pal.Text : pal.Muted, flags);
-        }
+        TextRenderer.DrawText(g, name, NameFont, new Rectangle(x, Ui.S(9), nameWidth, NameFont.Height), _a.Disabled ? pal.Muted : pal.Text, flags);
+        TextRenderer.DrawText(g, Meta(), MetaFont, new Rectangle(x, Ui.S(28), nameWidth, MetaFont.Height), pal.Muted, flags);
 
-        // Hairline meters on the right for the windows this account has (Codex Team: weekly only,
-        // Grok: one weekly or monthly pool). No usage yet: two empty placeholders.
+        // Hairline meters on the right for the windows this account has. No usage yet: two empty placeholders.
         var u = _a.ShownUsage;
         var meters = new List<(string, double?)>();
         if (u?.FiveHour is { } f) meters.Add(("5h", f.Pct));
         if (u?.SevenDay is { } s) meters.Add(("wk", s.Pct));
-        if (meters.Count == 0 && u?.Scoped is [var first, ..]) meters.Add(("mo", first.Pct));
         if (meters.Count == 0) meters.AddRange([("5h", null), ("wk", null)]);
         if (meters.Count == 1) Meter(g, pal, meters[0].Item1, meters[0].Item2, right, Ui.S(21));
         else { Meter(g, pal, meters[0].Item1, meters[0].Item2, right, Ui.S(12)); Meter(g, pal, meters[1].Item1, meters[1].Item2, right, Ui.S(30)); }

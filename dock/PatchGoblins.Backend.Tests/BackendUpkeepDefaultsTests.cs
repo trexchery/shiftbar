@@ -17,18 +17,16 @@ public sealed class BackendUpkeepDefaultsTests
         try
         {
             var engine = new Engine(Path.Combine(temp.Path, "must-never-run"));
-            var settings = new DockSettings { AgentSummaryAt = DateTimeOffset.Now, AutoLine = false };
+            var settings = new DockSettings { AutoLine = false };
             Snapshot current = new(1, 1, [Account(10)]);
             var notices = new List<string>();
             var refreshes = 0;
-            using var supervisor = new Supervisor(engine, new Cli("must-never-git", null), new AgentStore(Path.Combine(temp.Path, "agents")), new AgentsConfig());
             using var upkeep = new BackendUpkeep(engine, settings, () => current, (_, text) => notices.Add(text), () => { refreshes++; return Task.CompletedTask; });
             upkeep.ApplyEngineConfig(new Dictionary<string, string?> { ["autoswitch.threshold"] = "83.5" });
             Assert.Equal(83.5, upkeep.EffectiveThreshold);
-            await upkeep.TickAsync(supervisor);
-            Assert.Equal(83.5, supervisor.Config.Threshold);
+            await upkeep.TickAsync();
             current = current with { Accounts = [Account(100)] };
-            await upkeep.TickAsync(supervisor);
+            await upkeep.TickAsync();
             Assert.Empty(notices);
             Assert.Equal(0, refreshes);
             Assert.False(File.Exists(Path.Combine(temp.Path, "prime.json")));
@@ -54,21 +52,20 @@ public sealed class BackendUpkeepDefaultsTests
         try
         {
             var engine = new Engine("must-never-run");
-            var settings = new DockSettings { AgentSummaryAt = DateTimeOffset.Now, QuotaNotifications = true };
+            var settings = new DockSettings { QuotaNotifications = true };
             Snapshot current = new(1, 1, [Account(10)]);
             var notices = new List<string>();
-            using var supervisor = new Supervisor(engine, new Cli("must-never-git", null), new AgentStore(Path.Combine(temp.Path, "agents")), new AgentsConfig());
             using var upkeep = new BackendUpkeep(engine, settings, () => current, (_, text) => notices.Add(text), () => Task.CompletedTask);
-            await upkeep.TickAsync(supervisor);
+            await upkeep.TickAsync();
             current = current with { Accounts = [Account(100)] };
-            await upkeep.TickAsync(supervisor);
+            await upkeep.TickAsync();
             Assert.Single(notices);
             Assert.Contains("limit reached", notices[0]);
             current = current with { Accounts = [Account(0) with { UsageStatus = "unavailable" }] };
-            await upkeep.TickAsync(supervisor);
+            await upkeep.TickAsync();
             Assert.Single(notices);
             current = current with { Accounts = [Account(0)] };
-            await upkeep.TickAsync(supervisor);
+            await upkeep.TickAsync();
             Assert.Equal(2, notices.Count);
             Assert.Contains("reset", notices[1]);
         }

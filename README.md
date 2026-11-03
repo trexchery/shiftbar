@@ -100,8 +100,6 @@ Goblins work only while that terminal is open. Close it and they pause; reopen i
 </tr>
 </table>
 
-Full details, limits and costs: **[docs/agents.md](docs/agents.md)**.
-
 > [!IMPORTANT]
 > **Read Anthropic's terms first.** The [consumer terms](https://www.anthropic.com/legal/consumer-terms) (§3) restrict automated or scripted access to subscriptions, and Pro/Max limits assume ordinary individual use. Running agents or Auto-Prime on your accounts is your call and your risk. Agents skip API-key accounts, and stop before a subscription with extra usage turned on reaches its switch threshold.
 
@@ -128,8 +126,6 @@ git clone https://github.com/trexchery/patch-goblins.git
 cd patch-goblins
 pwsh dock\build.ps1
 ```
-
-README art: `python dock/tools/make-readme-art.py` (from the same sprite as the app icon).
 
 </details>
 

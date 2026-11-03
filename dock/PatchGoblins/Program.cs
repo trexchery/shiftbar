@@ -5,19 +5,7 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
-        // Started by the agents terminal's Claude Code as its Patch Goblins tools; talks to the running tray.
-        if (args is ["agents-mcp", ..]) { Environment.ExitCode = AgentsLink.ServeMcp(args); return; }
-        // A read-only readiness report on a repository, printed to the console it was started from.
-        if (args is ["doctor", ..]) { Environment.ExitCode = Doctor.Run(args); return; }
-        // An agent's PreToolUse hook: may this file tool call reach that path?
-        if (args is ["guard", _, ..])
-        {
-            using var why = new StreamWriter(Console.OpenStandardError()) { AutoFlush = true };
-            Environment.ExitCode = Policy.Hook(args[1..], () => new StreamReader(Console.OpenStandardInput(), System.Text.Encoding.UTF8).ReadToEnd(), why);
-            return;
-        }
-
-        var isolated = DockSettings.Env("DATA") is { Length: > 0 } ? "-" + AgentStore.KeyFor(DockSettings.Dir) : "";
+        var isolated = DockSettings.Env("DATA") is { Length: > 0 } ? "-" + DirKey(DockSettings.Dir) : "";
         using var mutex = new Mutex(true, @"Local\PatchGoblins-" + Environment.UserName + isolated, out var first);
         if (!first) return; // already running in the tray
 
@@ -40,8 +28,8 @@ static class Program
         Application.Run(new TrayApp(engine, minimized: args.Contains("--minimized")));
     }
 
-    // One-time carry-over from the pre-rename names (clautoswap, autodock, then handoff): settings folder, agents and autostart entry.
-    // False when an old tray is still running: two trays must never run the same agents.
+    // One-time carry-over from the pre-rename names (clautoswap, autodock, then handoff): settings folder and autostart entry.
+    // False when an old tray is still running: two trays must never manage the same accounts.
     static bool MigrateFromOldNames()
     {
         if (DockSettings.Env("DATA") is { Length: > 0 }) return true; // isolated instance
@@ -55,45 +43,12 @@ static class Program
         var old = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), name);
         var oldRun = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")?.GetValue(name) is string;
         if (!Directory.Exists(old) && !oldRun) return true;
-        // Only the old tray holds its mutex; another process of that name is an old agents terminal's `<name> agents-mcp` bridge.
         if (Mutex.TryOpenExisting($@"Local\{char.ToUpperInvariant(name[0])}{name[1..]}-" + Environment.UserName, out var oldTray))
         {
             oldTray.Dispose();
-            MessageBox.Show($"The old {name} tray is still running. Quit it (tray icon, Exit), then start Patch Goblins again: it carries over your settings and agents.",
+            MessageBox.Show($"The old {name} tray is still running. Quit it (tray icon, Exit), then start Patch Goblins again: it carries over your settings.",
                 "Patch Goblins", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return false;
-        }
-        if (System.Diagnostics.Process.GetProcessesByName(name).Length > 0)
-        {
-            MessageBox.Show($"An agents terminal the old {name} tray opened is still open. Close it (or end its Claude Code session), then start Patch Goblins again: it carries over your settings and agents.",
-                "Patch Goblins", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return false;
-        }
-        // Workers outlive the tray that started them, and work inside the old folder: it cannot move under them, and
-        // Patch Goblins must not start beside them without their state.
-        if (AgentStore.Running(Path.Combine(old, "agents")))
-        {
-            MessageBox.Show($"Agents the old {name} tray started are still working. Start Patch Goblins again once they finish: it then carries over your settings and agents.",
-                "Patch Goblins", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return false;
-        }
-        // The agents' state moves whole or not at all, before anything else: left behind, a new empty state would hide it for good.
-        var (oldAgents, agents) = (Path.Combine(old, "agents"), Path.Combine(DockSettings.Dir, "agents"));
-        if (Directory.Exists(oldAgents) && !(Directory.Exists(agents) && Directory.EnumerateFileSystemEntries(agents).Any()))
-        {
-            try
-            {
-                Directory.CreateDirectory(DockSettings.Dir);
-                if (Directory.Exists(agents)) Directory.Delete(agents);
-                Directory.Move(oldAgents, agents);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                Log(e);
-                MessageBox.Show($"Something still has a file open in the old {name} agents folder (a worktree in an editor or a shell). Close it, then start Patch Goblins again: it carries over your settings and agents.",
-                    "Patch Goblins", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return false;
-            }
         }
         try
         {
@@ -120,6 +75,14 @@ static class Program
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log(e); }
         return true;
+    }
+
+    /// A short stable key for an isolated instance's data folder (its mutex suffix): 6 hex digits of the path's SHA-256.
+    internal static string DirKey(string path)
+    {
+        var full = Path.GetFullPath(path).TrimEnd('\\', '/');
+        if (OperatingSystem.IsWindows()) full = full.ToLowerInvariant();
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(full)))[..6].ToLowerInvariant();
     }
 
     static string LogPath => Path.Combine(DockSettings.Dir, "patch-goblins.log");

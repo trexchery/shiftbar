@@ -32,7 +32,7 @@ public sealed partial class Engine(string exe)
             }.FirstOrDefault(File.Exists);
             if (appEngine != null) return new Engine(appEngine);
         }
-        // No PATH fallback: an upstream claude-swap there lacks DPAPI sealing and providers.
+        // No PATH fallback: an upstream claude-swap there lacks DPAPI sealing.
         throw new EngineException(
             "Engine not found. Expected engine\\cswap.exe next to patch-goblins.exe; " +
             "reinstall Patch Goblins (developers: set PATCH_GOBLINS_ENGINE).");
@@ -112,14 +112,10 @@ public sealed partial class Engine(string exe)
 
     /// `refresh`: someone is looking, so re-read readings older than the
     /// engine's 3-minute floor instead of waiting out the idle back-off.
-    public async Task<Snapshot> ListAsync(bool refresh = false, string provider = "claude")
-    {
-        var s = await RunJsonAsync<Snapshot>(Args(provider, refresh ? ["list", "--json", "--refresh"] : ["list", "--json"]));
-        return s with { Accounts = s.Accounts.Select(a => a with { Provider = provider }).ToList() };
-    }
+    public Task<Snapshot> ListAsync(bool refresh = false) =>
+        RunJsonAsync<Snapshot>(refresh ? ["list", "--json", "--refresh"] : ["list", "--json"]);
 
-    public Task<SwitchResult> SwitchAsync(int number, string provider = "claude") =>
-        RunJsonAsync<SwitchResult>(Args(provider, ["switch", number.ToString(), "--json"]));
+    public Task<SwitchResult> SwitchAsync(int number) => RunJsonAsync<SwitchResult>(["switch", number.ToString(), "--json"]);
 
     /// The two calls a usage-limit error makes, not queued behind the gate (an `auto --once` can hold it for ~30 s). Safe:
     /// the engine serializes what it mutates itself, as it must for several terminals (the store's FileLock, Claude Code's
@@ -159,14 +155,6 @@ public sealed partial class Engine(string exe)
         }
         catch (Exception e) { log(e); }
     }
-
-    /// Writes local hand-off notes from `source`'s newest session in `folder`; returns their path.
-    public Task<HandoffResult> HandoffAsync(string source, string folder) =>
-        RunJsonAsync<HandoffResult>(["handoff", "--from", source, "--dir", folder, "--json"]);
-
-    /// `cswap codex …` / `cswap grok …` route to the provider engines; Claude is the bare CLI.
-    internal static string[] Args(string provider, params string[] args) =>
-        provider == "claude" ? args : [provider, .. args];
 
     /// One auto-switch tick. The engine owns thresholds, cooldown, hysteresis,
     /// quarantine and the disabled/API-key exclusions; exit 0=switched 2=no-op 3=blocked.
@@ -213,10 +201,7 @@ public sealed partial class Engine(string exe)
     /// Windows Terminal when installed, plain conhost otherwise; inside it PowerShell 7, else Windows PowerShell, else cmd.
     public void LaunchConsole(string title, string? workDir, params string[] args) => LaunchConsoleWith(Exe, title, workDir, args);
 
-    /// The same, with `env` set for the console and everything it runs.
-    public void LaunchConsole(string title, string? workDir, IReadOnlyDictionary<string, string> env, params string[] args) => LaunchConsoleWith(Exe, title, workDir, args, env);
-
-    /// Same console, running `exe` (e.g. the provider's own CLI) instead of the engine.
+    /// Same console, running `exe` instead of the engine.
     public static void LaunchConsoleWith(string Exe, string title, string? workDir, params string[] args) => LaunchConsoleWith(Exe, title, workDir, args, null);
 
     public static void LaunchConsoleWith(string Exe, string title, string? workDir, string[] args, IReadOnlyDictionary<string, string>? env)

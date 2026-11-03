@@ -99,7 +99,7 @@ public sealed class Primer
 
     /// When a live reading was taken; last-known readings never count.
     static DateTimeOffset? FetchedAt(Account a, DateTimeOffset now) =>
-        a is { Provider: "claude", UsageStatus: "ok", Usage: not null }
+        a is { UsageStatus: "ok", Usage: not null }
             ? a.UsageFetchedAt ?? (a.UsageAgeSeconds is { } s ? now - TimeSpan.FromSeconds(s) : null)
             : null;
 
@@ -107,7 +107,7 @@ public sealed class Primer
     /// prime shouldn't cost anything as far as the reading shows. The margin also covers unlimited extra
     /// usage, which the reading doesn't report: it only bills once a plan limit is reached.
     static bool Eligible(Account a) =>
-        a is { Provider: "claude", Disabled: false, UsageStatus: "ok", Usage: { Spend: null } u }
+        a is { Disabled: false, UsageStatus: "ok", Usage: { Spend: null } u }
         && (u.SevenDay?.Pct ?? 0) < 95 && (u.Scoped ?? []).All(w => w.Pct < 95);
 
     /// Accounts whose fresh 5-hour window hasn't started, read within `within` and after the previous

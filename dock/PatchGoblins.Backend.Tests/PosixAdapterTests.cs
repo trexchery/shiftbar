@@ -1,6 +1,4 @@
-using System.Security.Cryptography;
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using PatchGoblins;
 using Xunit;
@@ -9,8 +7,7 @@ namespace PatchGoblins.Tests;
 
 public sealed class PosixAdapterTests
 {
-    /// Shared move decisions leave a workflow running in another session alone.
-    /// The macOS backend no longer closes or moves terminal sessions.
+    /// A window running a workflow (another session's too, after a /clear) is never movable, so it is never closed.
     [Fact]
     public void AWindowRunningAWorkflowIsNeverMovedOnPosix()
     {
@@ -20,35 +17,11 @@ public sealed class PosixAdapterTests
         Directory.CreateDirectory(run);
         File.WriteAllLines(Path.Combine(run, "journal.jsonl"), ["""{"type":"launched"}""", """{"type":"started","key":"k","agentId":"a","label":"x","phase":"P"}"""]);
         var runs = ResumeStopped.RunningWorkflows(project, DateTime.UtcNow.AddMinutes(-5));
-        Assert.Equal(["k"], Assert.Single(runs).InFlight);
+        Assert.Equal("wf_a", Assert.Single(runs).RunId);
         var idle = new StoppedSession(1, "sid", "/w", Path.Combine(tmp.Path, "profile"), 3, Path.Combine(project, "sid.jsonl"), false, Runs: runs);
-        ResumeStopped.Step Of(StoppedSession s) => ResumeStopped.Decide(s, TimeSpan.FromHours(1), TimeSpan.Zero, 4, false, 0, () => true);
-        Assert.Equal(ResumeStopped.Step.Ignore, Of(idle));
-        Assert.Equal(ResumeStopped.Step.Left, Of(idle with { AtLimit = true }));
-        Assert.Equal(ResumeStopped.Step.Move, Of(idle with { Runs = null }));
-        // MoveWorkflows on: another session's run still never moves the window.
-        Assert.Equal(ResumeStopped.Step.Ignore, ResumeStopped.Decide(idle, TimeSpan.FromHours(1), TimeSpan.Zero, 4, false, 0, () => true, true, DateTime.UtcNow));
-    }
-
-    /// Shared workflow decision and resume arguments for a paused run.
-    /// The macOS backend keeps the original terminal open regardless.
-    [Fact]
-    public void APausedWorkflowMovesOnPosix()
-    {
-        using var tmp = new TempDir();
-        var project = Path.Combine(tmp.Path, "projects", "-w");
-        var run = Path.Combine(project, "sid", "subagents", "workflows", "wf_a");
-        Directory.CreateDirectory(run);
-        Directory.CreateDirectory(Path.Combine(project, "sid", "workflows", "scripts"));
-        File.WriteAllText(Path.Combine(project, "sid", "workflows", "scripts", "go-wf_a.js"), "");
-        File.WriteAllLines(Path.Combine(run, "journal.jsonl"), ["""{"type":"launched"}""", """{"type":"started","key":"k","agentId":"a","label":"x","phase":"P"}"""]);
-        File.WriteAllLines(Path.Combine(run, "agent-a.jsonl"), ["""{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"message":{"model":"<synthetic>","role":"assistant","content":[]}}"""]);
-        var s = new StoppedSession(1, "sid", "/w", Path.Combine(tmp.Path, "profile"), 3, Path.Combine(project, "sid.jsonl"), true,
-            Runs: ResumeStopped.RunningWorkflows(project, DateTime.UtcNow.AddMinutes(-5)));
-        ResumeStopped.Step Of(bool on) => ResumeStopped.Decide(s, TimeSpan.FromHours(1), TimeSpan.Zero, 4, false, 0, () => true, on, DateTime.UtcNow);
-        Assert.Equal(ResumeStopped.Step.Left, Of(false));
-        Assert.Equal(ResumeStopped.Step.Move, Of(true));
-        Assert.EndsWith("/profile2/projects/-w/sid/workflows/scripts/go-wf_a.js and resumeFromRunId wf_a.", ResumeStopped.ResumeArgs(s, Path.Combine(tmp.Path, "profile2"))[2]);
+        Assert.False(idle.Movable);
+        Assert.False((idle with { AtLimit = true }).Movable);
+        Assert.True((idle with { Runs = null }).Movable);
     }
 
     /// The check right before a close holds only for the process that wrote the record: a missing, unreadable or other
@@ -88,43 +61,9 @@ public sealed class PosixAdapterTests
     }
 
     [Fact]
-    public async Task AStaleRecoveryRecordNeverKillsAnUnrelatedProcessGroup()
+    public void HardeningRetainsExecutablesAndDoesNotFollowLinks()
     {
-        using var tmp = new TempDir();
-        var previous = Environment.GetEnvironmentVariable("PATCH_GOBLINS_DATA");
-        Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", tmp.Path);
-        var python = Engine.FindOnPath("python3")!;
-        using var unrelated = Process.Start(new ProcessStartInfo(python,
-            ["-c", "import os,time; os.setsid(); print('ready',flush=True); time.sleep(60)"])
-            { UseShellExecute = false, RedirectStandardOutput = true })!;
-        try
-        {
-            Assert.Equal("ready", await unrelated.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(10)));
-            var job = "stale-" + Guid.NewGuid().ToString("N");
-            var records = Path.Combine(tmp.Path, "processes");
-            Directory.CreateDirectory(records);
-            var name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(job))).ToLowerInvariant() + ".json";
-            File.WriteAllText(Path.Combine(records, name), JsonSerializer.Serialize(new
-            {
-                pid = unrelated.Id,
-                started = (unrelated.StartTime.ToUniversalTime() - DateTime.UnixEpoch).TotalSeconds,
-                exitCode = (int?)null,
-            }));
-            AgentProcess.Reap(job);
-            await Task.Delay(100);
-            Assert.False(unrelated.HasExited);
-        }
-        finally
-        {
-            if (!unrelated.HasExited) unrelated.Kill(entireProcessTree: true);
-            await unrelated.WaitForExitAsync();
-            Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", previous);
-        }
-    }
-
-    [Fact]
-    public void HardeningRetainsWorktreeExecutablesAndDoesNotFollowLinks()
-    {
+        if (OperatingSystem.IsWindows()) return; // Unix file modes: runs on Linux and macOS
         using var temp = new TempDir();
         var data = Path.Combine(temp.Path, "data");
         Directory.CreateDirectory(data);
@@ -138,58 +77,5 @@ public sealed class PosixAdapterTests
         StoreSecurity.Harden(data);
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(executable));
         Assert.True(File.GetUnixFileMode(outside).HasFlag(UnixFileMode.OtherRead));
-    }
-
-    [Fact]
-    public async Task AStaleJobRecordCannotMakeANewLaunchReady()
-    {
-        using var tmp = new TempDir();
-        var previous = Environment.GetEnvironmentVariable("PATCH_GOBLINS_DATA");
-        Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", tmp.Path);
-        try
-        {
-            var job = "recovered-" + Guid.NewGuid().ToString("N");
-            var records = Path.Combine(tmp.Path, "processes");
-            Directory.CreateDirectory(records);
-            var name = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(job))).ToLowerInvariant() + ".json";
-            File.WriteAllText(Path.Combine(records, name), "{\"pid\":2147483647,\"started\":0,\"exitCode\":0}");
-            var input = Path.Combine(tmp.Path, "in");
-            var output = Path.Combine(tmp.Path, "out");
-            File.WriteAllText(input, "");
-            using var worker = AgentProcess.Start("/bin/sh", ["-c", "sleep 30"], tmp.Path, job, input, output, output);
-            try
-            {
-                using var reattached = AgentProcess.Attach(job, worker.Pid, worker.CreatedTicks);
-                Assert.NotNull(reattached);
-                Assert.Throws<EngineException>(() => AgentProcess.Start("/bin/sh", ["-c", "exit 0"], tmp.Path, job, input, output, output));
-                using var state = JsonDocument.Parse(File.ReadAllText(Path.Combine(records, name)));
-                Assert.Equal(worker.Pid, state.RootElement.GetProperty("pid").GetInt32());
-            }
-            finally { await worker.StopAsync(TimeSpan.FromSeconds(1)); }
-        }
-        finally { Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", previous); }
-    }
-
-    [Fact]
-    public async Task WorkerArgumentsRemainLiteralAndPrivateFilesStayPrivate()
-    {
-        using var tmp = new TempDir();
-        var previous = Environment.GetEnvironmentVariable("PATCH_GOBLINS_DATA");
-        Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", tmp.Path);
-        try
-        {
-            var input = Path.Combine(tmp.Path, "in");
-            var output = Path.Combine(tmp.Path, "out");
-            File.WriteAllText(input, "");
-            var literal = "literal $(touch SHOULD_NOT_EXIST); ' \" ";
-            using var worker = AgentProcess.Start("/usr/bin/printf", ["%s", literal], tmp.Path,
-                "literal-" + Guid.NewGuid().ToString("N"), input, output, output);
-            await worker.WaitForExitAsync();
-            Assert.Equal(0, worker.ExitCode);
-            Assert.Equal(literal, File.ReadAllText(output));
-            Assert.False(File.Exists(Path.Combine(tmp.Path, "SHOULD_NOT_EXIST")));
-            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(output));
-        }
-        finally { Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", previous); }
     }
 }

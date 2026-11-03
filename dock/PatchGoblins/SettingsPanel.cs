@@ -8,8 +8,7 @@ public sealed class SettingsPanel : UserControl
     public readonly NumericUpDown SwitchBuffer = new() { Minimum = 0, Maximum = 300, Value = 0 };
     public readonly TextBox TerminalFolder = new() { PlaceholderText = "your user folder" };
     public readonly Toggle Startup = new("");
-    public readonly Toggle AutoSwitch = new(""), AutoProject = new(""), QuotaNotify = new(""), AutoPrime = new(""), DraftPrs = new(""), Ultracode = new(""), AskApproval = new(""), AutoLine = new("");
-    public readonly NumericUpDown AgentIssues = new() { Minimum = 0, Maximum = 10, Value = 1 }, AgentOpenPrs = new() { Minimum = 1, Maximum = 50, Value = 10 };
+    public readonly Toggle AutoSwitch = new(""), AutoProject = new(""), QuotaNotify = new(""), AutoPrime = new(""), AutoLine = new("");
     public readonly TextBox Search = new() { PlaceholderText = "Search settings" };
 
     public event Action? SaveClicked, CancelClicked;
@@ -35,18 +34,11 @@ public sealed class SettingsPanel : UserControl
         Buffer(_rows); // scrolling paints the list once, not each row in turn
         _none = new Label { Text = "No setting matches.", Tag = "muted", AutoSize = true, Visible = false, Margin = new Padding(_pad, Ui.S(8), 0, 0) };
 
-        Section("Team");
+        Section("Accounts");
         Row("Start with Windows", null, Startup, Ui.S(34));
         Row("Terminal folder", "Where Open terminal starts", TerminalFolderPicker(), Ui.S(200));
         Row("Use project accounts", "A folder's assigned account", AutoProject, Ui.S(34));
         Row("Quota notifications", "Near, at or past a limit", QuotaNotify, Ui.S(34));
-
-        Section("Work");
-        Row("Issues at once", "0 = one per account with room", AgentIssues, Ui.S(72));
-        Row("Open pull requests", "New work waits past this many", AgentOpenPrs, Ui.S(72));
-        Row("Draft pull requests", null, DraftPrs, Ui.S(34));
-        Row("Ultracode", "Parallel subagents; uses quota faster", Ultracode, Ui.S(34));
-        Row("Ask for approval", "Off: never asks, except protected files", AskApproval, Ui.S(34));
 
         Section("Upkeep");
         Row("Auto-switch near limit", "Claude accounts only", AutoSwitch, Ui.S(34));

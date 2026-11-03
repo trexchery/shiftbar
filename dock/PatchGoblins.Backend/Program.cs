@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Text;
-using System.Text.Json;
 
 namespace PatchGoblins;
 
@@ -12,42 +11,13 @@ internal static class Program
         Console.OutputEncoding = new UTF8Encoding(false);
         if (args is ["--help"] or ["-h"])
         {
-            Console.WriteLine("Patch Goblins backend: --serve | status | doctor | agents-terminal --repo PATH | call TOOL JSON --repo PATH | agents-mcp --repo PATH");
+            Console.WriteLine("Patch Goblins backend: --serve | --version");
             return 0;
         }
         if (args is ["--version"]) { Console.WriteLine("Patch Goblins 0.7.0"); return 0; }
-        if (args is ["agents-mcp", ..]) return AgentsLink.ServeMcp(args);
-        // A worker's PreToolUse hook, as on Windows: 0 lets the file tool call run, 2 refuses it with the reason on stderr.
-        if (args is ["guard", _, ..])
-        {
-            using var why = new StreamWriter(Console.OpenStandardError()) { AutoFlush = true };
-            return Policy.Hook(args[1..], () => new StreamReader(Console.OpenStandardInput(), new UTF8Encoding(false)).ReadToEnd(), why);
-        }
-        if (args is ["doctor", ..]) return Doctor.Run(args);
-        if (args is ["call", var tool, var json, "--repo", var repo])
-        {
-            using var doc = JsonDocument.Parse(json);
-            var text = AgentsLink.CallAsync(tool, doc.RootElement, Path.GetFullPath(repo)).GetAwaiter().GetResult();
-            if (text == null) { Console.Error.WriteLine("Start Patch Goblins from Applications first."); return 2; }
-            Console.WriteLine(text);
-            return 0;
-        }
-        if (args is ["status"])
-        {
-            var text = AgentsLink.CallAsync("desktop_status", JsonSerializer.SerializeToElement(new { }), "").GetAwaiter().GetResult();
-            if (text == null) return 2;
-            Console.WriteLine(text);
-            return 0;
-        }
-        if (args is ["agents-terminal", "--repo", var folder])
-        {
-            folder = Path.GetFullPath(folder);
-            AgentsTerminal.Open(Engine.Locate(), AgentStore.DefaultRoot, folder, DockSettings.Load().PreserveRemoteControl, "idle");
-            return 0;
-        }
         if (args is not ["--serve"])
         {
-            Console.Error.WriteLine("Usage: patch-goblins-backend --serve | status | doctor | agents-terminal --repo PATH | call TOOL JSON --repo PATH | agents-mcp --repo PATH");
+            Console.Error.WriteLine("Usage: patch-goblins-backend --serve | --version");
             return 2;
         }
         try

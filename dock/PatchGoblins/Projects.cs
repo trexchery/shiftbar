@@ -9,7 +9,7 @@ public sealed record ProjectMapping(string Folder, string Email, string Org)
     public string Leaf => Path.GetFileName(Folder.TrimEnd('\\', '/')) is { Length: > 0 } n ? n : Folder;
 
     /// The engine's rule (switcher._find_account_slot): same email and same organization, "" when none.
-    public bool Matches(Account a) => a.Provider == "claude" && Email == a.Email && Org == (a.OrganizationUuid ?? "");
+    public bool Matches(Account a) => Email == a.Email && Org == (a.OrganizationUuid ?? "");
 }
 
 /// Read-only view of <backup root>/mappings.json. The engine owns the file and its path
@@ -66,15 +66,4 @@ public static class Launch
         if (claudeArgs.Length > 0) { a.Add("--"); a.AddRange(claudeArgs); }
         return [.. a];
     }
-
-    /// The general agent: not tied to any repo, one fixed folder, run with no account (`cswap run` in an unmapped
-    /// folder is the default login, whichever it is at launch), so auto-switch keeps it on one with room.
-    /// An existing `handoff-general` keeps its name: its Claude sessions are filed under that path.
-    public static string GeneralFolder => Directory.Exists(Path.Combine(StoreSecurity.UserProfile, "handoff-general"))
-        ? Path.Combine(StoreSecurity.UserProfile, "handoff-general") : Path.Combine(StoreSecurity.UserProfile, "patch-goblins-general");
-
-    /// Continue-in Claude: through `cswap run` when an account is known, else null (launch claude directly).
-    /// A folder-mapped account is left to the engine (no NUM); otherwise the active account is named.
-    public static string[]? Continue(Account? mapped, Account? active, bool restoreRc, string prompt) =>
-        (mapped ?? active) == null ? null : Run(mapped == null ? active!.Number : null, restoreRc, prompt);
 }

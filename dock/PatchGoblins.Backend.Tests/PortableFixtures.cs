@@ -1,5 +1,4 @@
-using System.Diagnostics;
-using PatchGoblins;
+using System.Collections.Concurrent;
 using Xunit;
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
@@ -13,55 +12,38 @@ sealed class TempDir : IDisposable
     public void Dispose() { try { Directory.Delete(Path, recursive: true); } catch (IOException) { } }
 }
 
-static class AgentProcessTests
+/// A single-thread context, as the backend host gives BackendUpkeep: work posted here runs on one thread, in order.
+sealed class Loop : SynchronizationContext, IDisposable
 {
-    public static async Task WaitUntil(Func<bool> condition)
+    readonly BlockingCollection<(SendOrPostCallback, object?)> _queue = [];
+
+    public Loop()
     {
-        var until = DateTime.UtcNow.AddSeconds(30);
-        while (!condition())
+        new Thread(() =>
         {
-            Assert.True(DateTime.UtcNow < until, "Timed out awaiting process condition");
-            await Task.Delay(100);
-        }
-    }
-}
-
-public class PortableProcessTests
-{
-    [Fact]
-    public async Task WorkerFilesExitCodesAndReattachmentUseProcessIdentity()
-    {
-        using var tmp = new TempDir();
-        Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", tmp.Path);
-        var input = System.IO.Path.Combine(tmp.Path, "in");
-        var output = System.IO.Path.Combine(tmp.Path, "out");
-        File.WriteAllText(input, "synthetic input\n");
-        var job = "pg-" + Guid.NewGuid().ToString("N");
-        using var process = AgentProcess.StartShell("cat; sleep 1; exit 7", tmp.Path, job, input, output);
-        using var attached = AgentProcess.Attach(job, process.Pid, process.CreatedTicks);
-        Assert.NotNull(attached);
-        Assert.Null(AgentProcess.Attach(job, process.Pid, process.CreatedTicks + 1));
-        await process.WaitForExitAsync();
-        Assert.Equal(7, process.ExitCode);
-        Assert.Contains("synthetic input", File.ReadAllText(output));
+            SetSynchronizationContext(this);
+            foreach (var (callback, state) in _queue.GetConsumingEnumerable()) callback(state);
+        }) { IsBackground = true, Name = "upkeep test loop" }.Start();
     }
 
-    [Fact]
-    public async Task DetachedWorkerSurvivesWrapperDisposalThenStopsItsOwnDescendants()
+    public override void Post(SendOrPostCallback d, object? state)
     {
-        using var tmp = new TempDir();
-        Environment.SetEnvironmentVariable("PATCH_GOBLINS_DATA", tmp.Path);
-        var input = System.IO.Path.Combine(tmp.Path, "in");
-        var output = System.IO.Path.Combine(tmp.Path, "out");
-        File.WriteAllText(input, "");
-        var job = "pg-" + Guid.NewGuid().ToString("N");
-        var worker = AgentProcess.Start("/bin/sh", ["-c", "sleep 60 & wait"], tmp.Path, job, input, output, output);
-        var pid = worker.Pid;
-        var created = worker.CreatedTicks;
-        worker.Dispose();
-        using var again = AgentProcess.Attach(job, pid, created);
-        Assert.NotNull(again);
-        await again.StopAsync(TimeSpan.FromSeconds(1));
-        Assert.True(again.HasExited);
+        try { _queue.Add((d, state)); }
+        catch (InvalidOperationException) { } // disposed
     }
+
+    public override void Send(SendOrPostCallback d, object? state) => throw new NotSupportedException();
+
+    public Task<T> Run<T>(Func<Task<T>> work)
+    {
+        var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Post(async _ =>
+        {
+            try { tcs.SetResult(await work()); }
+            catch (Exception e) { tcs.SetException(e); }
+        }, null);
+        return tcs.Task;
+    }
+
+    public void Dispose() => _queue.CompleteAdding();
 }

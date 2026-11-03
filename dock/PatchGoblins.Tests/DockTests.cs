@@ -89,44 +89,6 @@ public class ModelTests
     }
 }
 
-public class ProviderTests
-{
-    // Shape of `cswap codex list --json` / `cswap grok list --json` (synthetic).
-    const string ProviderJson = """
-    {
-      "schemaVersion": 1, "activeAccountNumber": 1,
-      "accounts": [
-        { "number": 1, "email": "dev@example.com", "plan": "plus", "active": true, "usageStatus": "ok",
-          "usage": { "fiveHour": { "pct": 40, "resetsAt": "2026-06-22T23:00:00Z" },
-                     "sevenDay": { "pct": 10, "resetsAt": "2026-06-26T00:00:00Z" } }, "usageAgeSeconds": 3 },
-        { "number": 2, "email": "x@example.com", "active": false, "usageStatus": "token_expired", "usage": null,
-          "usageNote": "login expired; codex renews it after a switch, else re-enroll" },
-        { "number": 3, "email": "g@example.com", "active": false, "usageStatus": "ok",
-          "usage": { "scoped": [ { "name": "Monthly limit", "pct": 63.5, "resetsAt": "2026-07-01T00:00:00Z" } ] } }
-      ]
-    }
-    """;
-
-    [Fact]
-    public void ParsesProviderSnapshotAndPrefersEngineNote()
-    {
-        var s = Json.Parse<Snapshot>(ProviderJson);
-        Assert.Equal(3, s.Accounts.Count);
-        Assert.Equal("claude", s.Accounts[0].Provider); // tagged by Engine.ListAsync, never by the payload
-        Assert.Equal(40, s.Accounts[0].Usage!.FiveHour!.Pct);
-        Assert.Equal("login expired; codex renews it after a switch, else re-enroll", s.Accounts[1].StatusNote);
-        Assert.Equal(63.5, Format.Peak(s.Accounts[2]));
-        Assert.Equal("Now using", Json.Parse<SwitchResult>("""{"switched":true,"note":"Now using"}""").Note);
-    }
-
-    [Fact]
-    public void RoutesProviderArguments()
-    {
-        Assert.Equal(["list", "--json"], Engine.Args("claude", "list", "--json"));
-        Assert.Equal(["codex", "switch", "2", "--json"], Engine.Args("codex", "switch", "2", "--json"));
-    }
-}
-
 public class RedactionTests
 {
     [Theory]
@@ -341,6 +303,26 @@ public class SettingsDefaultsTests
     }
 
     [Fact]
+    public void AnOlderFileWithRetiredKeysStillLoadsAndDropsThemOnSave()
+    {
+        using var t = new TempDir();
+        var file = Path.Combine(t.Path, "settings.json");
+        File.WriteAllText(file, """
+            { "AutoSwitch": true, "AgentLastRepo": "C:\\repo", "AgentIssues": 3, "AgentOpenPrs": 5, "AgentDraftPrs": true,
+              "AgentUltracode": true, "AskApproval": false, "AgentSummaryAt": "2026-10-30T08:00:00+00:00",
+              "MoveWorkflows": true, "MoveWorkflowsAccepted": true, "QuotaNotifications": true }
+            """);
+        var s = DockSettings.Load(file);
+        Assert.True(s.AutoSwitch);
+        Assert.True(s.QuotaNotifications);
+        s.Save(file);
+        var saved = File.ReadAllText(file);
+        Assert.DoesNotContain("Agent", saved);
+        Assert.DoesNotContain("MoveWorkflows", saved);
+        Assert.DoesNotContain("AskApproval", saved);
+    }
+
+    [Fact]
     public void ExplicitValuesRoundTrip()
     {
         using var t = new TempDir();
@@ -362,7 +344,7 @@ public class QuotaAlertTests
             LastGoodUsage: status == "ok" ? null : new Usage(new Window(5, null), new Window(5, null), null, null),
             OrganizationUuid: org);
 
-    static List<QuotaAlert> Seen(QuotaAlerts q, params Account[] accounts) => q.Observe("claude", accounts);
+    static List<QuotaAlert> Seen(QuotaAlerts q, params Account[] accounts) => q.Observe(accounts);
 
     [Fact]
     public void FirstReadingIsASilentBaseline()
@@ -436,21 +418,17 @@ public class QuotaAlertTests
     }
 
     [Fact]
-    public void WindowsAccountsAndProvidersAreTrackedSeparately()
+    public void WindowsAndAccountsAreTrackedSeparately()
     {
         var q = new QuotaAlerts();
         var opus = new List<Window> { new(10, null, "Opus") };
         Seen(q, A("a@example.com", 10, 10, scoped: opus), A("b@example.com", 10, 10, org: "org-1"));
-        q.Observe("codex", [A("a@example.com", 10, 10)]);
 
         var alerts = Seen(q,
             A("a@example.com", 10, 90, scoped: [new(100, null, "Opus")]),
             A("b@example.com", 10, 10, org: "org-1"));
         Assert.Equal(["a@example.com · weekly at 90%", "a@example.com · Opus limit reached"], alerts.Select(a => a.Line));
 
-        // Same email, other provider: its own baseline, named with the provider.
-        var codex = Assert.Single(q.Observe("codex", [A("a@example.com", 85, 10)]));
-        Assert.Equal("Codex a@example.com · 5-hour at 85%", codex.Line);
         // Same email, other organization: a different account.
         Assert.Empty(Seen(q, A("b@example.com", 10, 10, org: "org-2")));
     }
@@ -534,7 +512,6 @@ public class ProjectMapTests
         Assert.True(team.Matches(B));
         Assert.False(team.Matches(B with { OrganizationUuid = "org-2" })); // same email, other organization
         Assert.False(team.Matches(B with { OrganizationUuid = null }));
-        Assert.False(personal.Matches(A with { Provider = "codex" }));
     }
 
     [Fact]
@@ -570,19 +547,6 @@ public class LaunchTests
         Assert.Equal(["run", "2"], Launch.Run(2, false));
         Assert.Equal(["run", "2", "--", "prompt"], Launch.Run(2, false, "prompt"));
         Assert.Equal(["run", "--", "prompt"], Launch.Run(null, false, "prompt"));
-    }
-
-    [Fact]
-    public void ContinueInClaudePicksTheAccountToRunAs()
-    {
-        Account mapped = new(1, "m@example.com", false, "ok", null), active = new(2, "a@example.com", true, "ok", null);
-        // Mapped folder: the engine resolves the mapping itself, so no NUM (passing the active one would pin the wrong account).
-        Assert.Equal(["run", "--restore-rc", "--", "p"], Launch.Continue(mapped, active, true, "p")!);
-        Assert.Equal(["run", "--restore-rc", "--", "p"], Launch.Continue(mapped, null, true, "p")!);
-        Assert.Equal(["run", "2", "--restore-rc", "--", "p"], Launch.Continue(null, active, true, "p")!);
-        Assert.Null(Launch.Continue(null, null, true, "p")); // no known account: launch claude directly
-        Assert.Equal(["run", "2", "--", "p"], Launch.Continue(null, active, false, "p")!);
-        Assert.Equal(["run", "--", "p"], Launch.Continue(mapped, active, false, "p")!);
     }
 
     [Fact]
@@ -779,12 +743,6 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             new Account(3, "side@example.com", false, "token_expired", null,
                 LastGoodUsage: new Usage(W(5, 4), W(12, 90), null, null), Disabled: true),
         ]);
-        var jobs = new Dictionary<string, Job>
-        {
-            ["personal@example.com|"] = new(JobKind.Working, "#42 fix login · reviewing"),
-            ["work@example.com|"] = new(JobKind.Yours, "yours · signed in"),
-            ["side@example.com|"] = new(JobKind.Idle, "sitting out"),
-        };
         void RowsAre(DashboardForm form, int height, string what)
         {
             var heights = FindRows(form).Select(r => r.Height).ToList();
@@ -793,15 +751,13 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
         Sta(() =>
         {
             using var form = NewForm();
-            form.Render(snap, null, null, null, jobs);
+            form.Render(snap, null);
             form.SetStatus("12:00");
-            Eq("", form.StatusText, "a refresh time is not news: the header says nothing until the team does");
-            form.SetTeam("1 working · 1 resting");
-            Eq("1 working · 1 resting", form.StatusText, "the team's line shows");
+            Eq("", form.StatusText, "a refresh time is not news: the header says nothing");
             form.SetStatus(DashboardForm.Updating);
-            Eq("1 working · 1 resting", form.StatusText, "updating does not replace the team's line");
+            Eq("", form.StatusText, "updating lives in the refresh button's tip");
             form.SetStatus(DashboardForm.Offline);
-            Eq("offline", form.StatusText, "offline outranks the team's line");
+            Eq("offline", form.StatusText, "offline shows in the header");
             form.SetStatus("12:00");
             form.Location = new Point(-10000, -10000); // off-screen: never steals the user's desktop
             form.Show();
@@ -810,42 +766,14 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             form.DrawToBitmap(bmp, new Rectangle(0, 0, form.Width, form.Height));
             InRange(form.Height, Ui.S(200), Ui.S(360), "three slim rows, not cards: flyout height");
             output.WriteLine($"measured: three rows {form.Height} (allowed {Ui.S(200)}..{Ui.S(360)})");
-            RowsAre(form, Ui.S(68), "each goblin's job line makes its row a line taller");
+            RowsAre(form, Ui.S(52), "the slim row");
             if (Environment.GetEnvironmentVariable("DOCK_RENDER_OUT") is { Length: > 0 } outPath) bmp.Save(outPath);
-            Eq(["TEAM"], SectionLabels(form), "no visitors: just the team");
-
-            form.Render(snap, null);
-            Application.DoEvents();
-            RowsAre(form, Ui.S(52), "no job to show: the slim row");
-
-            var codex = new Snapshot(1, 1, [new Account(1, "dev@example.com", true, "ok", new Usage(W(40, 3), W(10, 90), null, null)) { Provider = "codex" }]);
-            form.Render(snap, null, [("codex", codex, null), ("grok", null, "offline")], null, jobs);
-            Application.DoEvents();
-            Eq(["TEAM", "+ VISITORS · CODEX · GROK"], SectionLabels(form), "visitors stay closed until clicked");
-            Eq(0, FindRows(form).Count(r => r.Account.Provider != "claude"), "closed visitors list no rows");
-            var closedHeight = form.Height;
-            if (Environment.GetEnvironmentVariable("DOCK_RENDER_PROVIDERS_OUT") is { Length: > 0 } pOut)
-            {
-                form.Shimmer(-1); // the Agents button's glint sweeps for the first moments: a still frame
-                using var pb = new Bitmap(form.Width, form.Height);
-                form.DrawToBitmap(pb, new Rectangle(0, 0, form.Width, form.Height));
-                pb.Save(pOut);
-            }
-            form.SetVisitorsOpen(true);
-            Application.DoEvents();
-            Eq(["TEAM", "– VISITORS · CODEX · GROK", "CODEX", "GROK"], SectionLabels(form), "opened visitors");
-            Eq(["dev@example.com"], FindRows(form).Where(r => r.Account.Provider != "claude").Select(r => r.Account.Email).ToList(), "the visitor's row");
-            True(form.Height > closedHeight, $"opening visitors grows the flyout: closed {closedHeight}, open {form.Height}");
-            InRange(form.Height, Ui.S(300), Ui.S(560), "flyout height with visitors open");
-            output.WriteLine($"measured: visitors open {form.Height} (closed {closedHeight}; allowed {Ui.S(300)}..{Ui.S(560)})");
-            form.SetVisitorsOpen(false);
-            form.Render(snap, null);
-            Application.DoEvents();
+            Eq(["ACCOUNTS"], SectionLabels(form), "one section: the accounts");
 
             // A refresh while the flyout is hidden must leave it hidden: WM_SETREDRAW TRUE sets WS_VISIBLE, which put a blank,
             // never-activated (so never auto-hidden) flyout on the desktop.
             form.Hide();
-            form.Render(snap, null, null, null, jobs);
+            form.Render(snap with { Accounts = [.. snap.Accounts.Skip(1)] }, null); // something changed: a rebuild
             Application.DoEvents();
             True(!IsWindowVisible(form.Handle), "a refresh while hidden made the flyout visible");
             form.Show();
@@ -874,8 +802,7 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             Application.DoEvents();
             True(form.SettingsOpen && form.Width >= settings.Width && form.Height > Ui.S(200),
                 $"settings fill the flyout: open={form.SettingsOpen}, flyout {form.Width}x{form.Height}, panel width {settings.Width}, needs height > {Ui.S(200)}");
-            // The same three names as the tray menu and the flyout, in the same order.
-            Eq(["TEAM", "WORK", "UPKEEP"], All(settings).OfType<Label>().Select(l => l.Text).Where(t => t is "TEAM" or "WORK" or "UPKEEP").ToList(), "the settings' section names");
+            Eq(["ACCOUNTS", "UPKEEP"], All(settings).OfType<Label>().Select(l => l.Text).Where(t => t is "ACCOUNTS" or "UPKEEP").ToList(), "the settings' section names");
             if (Environment.GetEnvironmentVariable("DOCK_RENDER_SETTINGS_OUT") is { Length: > 0 } sOut)
             {
                 using var sb = new Bitmap(form.Width, form.Height);
@@ -883,38 +810,20 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
                 sb.Save(sOut);
             }
             // Search keeps the rows whose name, hint or section match every word.
-            settings.Search.Text = "draft";
-            Eq(["Draft pull requests"], settings.VisibleRows.ToList(), "search \"draft\"");
             settings.Search.Text = "upkeep switch";
             Eq(["Auto-switch near limit", "Automatic switch line", "Switch at", "Random switch delay"], settings.VisibleRows.ToList(), "search \"upkeep switch\"");
-            settings.Search.Text = "approval";
-            Eq(["Ask for approval"], settings.VisibleRows.ToList(), "search \"approval\"");
+            settings.Search.Text = "quota";
+            Eq(["Quota notifications"], settings.VisibleRows.ToList(), "search \"quota\"");
             settings.Search.Text = "";
-            Eq(14, settings.VisibleRows.Count(), "all settings rows");
+            Eq(9, settings.VisibleRows.Count(), "all settings rows");
             True(!settings.VisibleRows.Contains("Move running workflows"), "unsafe workflow migration is not offered");
             form.CloseSettings();
             True(!form.SettingsOpen, "closing settings leaves them open");
             True(form.Visible, "closing settings keeps the flyout open, but it is hidden");
             Eq(narrow, form.Width, "closing settings gives the flyout its width back");
 
-            // An approval waits on a card above the accounts; its answer removes it.
-            var asked = form.Ask("Start agents on app?", "They take its open issues.", TimeSpan.FromMinutes(1));
-            Application.DoEvents();
-            Eq(1, form.Pending, "an approval waits");
-            var card = All(form).First(c => c.Tag as string == "ask");
-            if (Environment.GetEnvironmentVariable("DOCK_RENDER_ASK_OUT") is { Length: > 0 } aOut)
-            {
-                using var ab = new Bitmap(form.Width, form.Height);
-                form.DrawToBitmap(ab, new Rectangle(0, 0, form.Width, form.Height));
-                ab.Save(aOut);
-            }
-            card.Controls.OfType<Pill>().First(p => p.Text == "Approve").PerformClick();
-            True(Until(() => asked.IsCompleted), $"the approval never completed after Approve was clicked (status {asked.Status}, pending {form.Pending})");
-            True(asked.IsCompletedSuccessfully && asked.Result, $"Approve did not answer yes (status {asked.Status})");
-            Eq(0, form.Pending, "an answered approval is removed");
-
             // The notice that replaces Windows' balloon: drawn off-screen, never shown here.
-            using var toast = new Toast("Agents need you", "app · #12 Fix login: which database should the cache use, Redis or the existing Postgres?", Palette.Current.Live, null);
+            using var toast = new Toast("All accounts near their limits", "work@example.com · 5-hour at 92%. Earliest reset in 1h 6m, on personal@example.com.", Palette.Current.Live, null);
             True(toast.Width > Ui.S(300) && toast.Height > Ui.S(50) && toast.Height < Ui.S(160), $"toast is {toast.Width}x{toast.Height}, expected width > {Ui.S(300)} and height in ({Ui.S(50)}, {Ui.S(160)})");
             output.WriteLine($"measured: toast {toast.Width}x{toast.Height}, expanded row {expanded}");
             if (Environment.GetEnvironmentVariable("DOCK_RENDER_TOAST_OUT") is { Length: > 0 } tOut)
@@ -961,7 +870,7 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             using var form = NewForm();
             var actions = new List<string>();
             form.AccountAction += (_, act) => actions.Add(act);
-            form.Render(snap, null, null, [.. maps, .. wide]);
+            form.Render(snap, null, [.. maps, .. wide]);
             form.Show();
             True(Until(() => form.Visible && IsWindowVisible(form.Handle)), "the flyout never showed");
             var rows = FindRows(form).ToList();

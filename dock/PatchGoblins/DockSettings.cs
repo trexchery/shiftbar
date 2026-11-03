@@ -16,19 +16,10 @@ public sealed class DockSettings
     public bool PreserveRemoteControl { get; set; } = true; // keys absent from an older settings.json keep these defaults
     public bool AutoProjectAccount { get; set; }
     public bool QuotaNotifications { get; set; }
-    public string? AgentLastRepo { get; set; }
     public bool AutoPrime { get; set; }
-    public int AgentIssues { get; set; } = 1;
-    public int AgentOpenPrs { get; set; } = 10;
-    public bool AgentDraftPrs { get; set; }
-    public bool AgentUltracode { get; set; }
-    public bool AskApproval { get; set; } = true;
-    public bool AutoLine { get; set; } = true; // the switch line follows each account's burn (SwitchLine); off: the engine's fixed threshold // off: agents never wait for a yes, except on files the repository's policy protects
-    public DateTimeOffset? AgentSummaryAt { get; set; }
+    public bool AutoLine { get; set; } = true; // the switch line follows each account's burn (SwitchLine); off: the engine's fixed threshold
     public string? TerminalFolder { get; set; } // where "Open terminal" starts browsing; null: the user folder
-    // Retained to read older settings files; automatic migration of user sessions is disabled.
-    public bool MoveWorkflows { get; set; }
-    public bool MoveWorkflowsAccepted { get; set; }
+    // Keys an older settings.json may still hold (Agent*, AskApproval, MoveWorkflows*) are ignored on load and dropped on the next save.
 
     public const int MinRefreshSeconds = 60;
 

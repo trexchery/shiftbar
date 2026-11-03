@@ -13,26 +13,25 @@ public sealed record QuotaAlert(string Who, string Window, QuotaState State, dou
     };
 }
 
-/// Turns successive refresh results into threshold-crossing alerts, one per (provider,
-/// account, window). The first reading of a window is a silent baseline. Only live readings
+/// Turns successive refresh results into threshold-crossing alerts, one per (account,
+/// window). The first reading of a window is a silent baseline. Only live readings
 /// count: errors, stale or last-known data and unknown status keep the previous state, and
 /// are never read as 0 %.
 public sealed class QuotaAlerts
 {
     readonly Dictionary<string, QuotaState> _state = [];
 
-    public List<QuotaAlert> Observe(string provider, IEnumerable<Account> accounts)
+    public List<QuotaAlert> Observe(IEnumerable<Account> accounts)
     {
         var alerts = new List<QuotaAlert>();
         foreach (var a in accounts)
         {
             if (a.UsageStatus != "ok" || a.Usage is not { } u) continue;
-            var who = (provider == "claude" ? "" : ProviderCli.Title(provider) + " ") + a.ShortName;
             foreach (var (window, w) in Windows(u))
             {
-                var key = $"{provider}|{a.Email}|{a.OrganizationUuid}|{window}";
+                var key = $"{a.Email}|{a.OrganizationUuid}|{window}";
                 var now = w.Pct >= 100 ? QuotaState.Exhausted : w.Pct >= Palette.WarnPct ? QuotaState.Near : QuotaState.Normal;
-                if (_state.TryGetValue(key, out var was) && Notable(was, now)) alerts.Add(new(who, window, now, w.Pct));
+                if (_state.TryGetValue(key, out var was) && Notable(was, now)) alerts.Add(new(a.ShortName, window, now, w.Pct));
                 _state[key] = now;
             }
         }

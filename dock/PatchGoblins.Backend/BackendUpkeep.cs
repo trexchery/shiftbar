@@ -17,7 +17,7 @@ internal sealed partial class BackendUpkeep : IDisposable
     readonly SwitchLine switchLine = new();
     readonly Primer primer = new(Primer.DefaultPath);
     readonly ConcurrentQueue<LimitHit> hits = new();
-    readonly Dictionary<string, Limit> agentLimits = [];
+    readonly Dictionary<string, Limit> subagentLimits = [];
     readonly HashSet<string> reported = [], told = [];
     readonly Dictionary<string, DateTime> moves;
     readonly string movesPath = Path.Combine(DockSettings.Dir, "resumed.json");
@@ -63,26 +63,18 @@ internal sealed partial class BackendUpkeep : IDisposable
         return live;
     }
 
-    public async Task TickAsync(Supervisor supervisor)
+    public async Task TickAsync()
     {
         if (disposed || ticking || snapshot() is not { } snap) return;
         ticking = true;
         try
         {
             SettingsChanged();
-            var notices = alerts.Observe("claude", snap.Accounts);
+            var notices = alerts.Observe(snap.Accounts);
             switchLine.Observe(snap.Accounts, DateTimeOffset.Now);
-            supervisor.Config.Threshold = EffectiveThreshold;
             if (settings.QuotaNotifications && QuotaAlerts.Balloon(notices) is { } balloon)
                 notify(balloon.Title, balloon.Text);
             var now = DateTimeOffset.Now;
-            if (now.Hour >= 8 && settings.AgentSummaryAt?.Date != now.Date)
-            {
-                var since = settings.AgentSummaryAt ?? now.AddDays(-1);
-                settings.AgentSummaryAt = now;
-                settings.Save();
-                if (supervisor.Summary(since) is { } summary) notify("Agents since last time", summary);
-            }
             if ((settings.AutoSwitch || settings.AutoPrime) && now - lastConfig > TimeSpan.FromMinutes(3))
                 await ReadConfigAsync();
             if (settings.AutoSwitch && threshold != null && (autoTask == null || autoTask.IsCompleted)
@@ -97,7 +89,7 @@ internal sealed partial class BackendUpkeep : IDisposable
             {
                 if (primer.Observe(snap.Accounts, now)) primer.Save();
                 if (primer.WantsReread(now)) { await engine.ListAsync(refresh: true); await refresh(); primer.Reread(now); }
-                // Agents or not (overnight too); the original 30-minute guard and current login reserve apply.
+                // Overnight too; the 30-minute guard and the current login's reserve apply.
                 if (threshold != null && now - lastPrime >= TimeSpan.FromMinutes(30)
                     && !(snap.Accounts.FirstOrDefault(a => a.Active) is { } login && ResumeStopped.Peak(login) >= EffectiveThreshold - hysteresis)
                     && primer.Ready(snap.Accounts, now) is { Count: > 0 } ready)
@@ -111,7 +103,6 @@ internal sealed partial class BackendUpkeep : IDisposable
             watch.Sync(dirs.Select(d => d.Dir));
             await Task.Run(() => watch.Poll(ResumeStopped.LiveTranscripts(dirs, DateTime.UtcNow)));
             while (hits.TryDequeue(out var hit)) await HandleLimitAsync(hit);
-            if (await FreePinnedAsync(supervisor, snapshot() ?? snap)) { await refresh(); return; }
             await ResumeAsync(snapshot() ?? snap);
         }
         catch (Exception error) { Program.Log(error); }
@@ -140,7 +131,7 @@ internal sealed partial class BackendUpkeep : IDisposable
         if (snapshot() == null || threshold == null) { hits.Enqueue(hit); return; }
         try
         {
-            if (ResumeStopped.AgentSession(hit.ConfigDir, hit.File) is { } parent) agentLimits[parent] = hit.Limit;
+            if (ResumeStopped.SubagentSession(hit.ConfigDir, hit.File) is { } parent) subagentLimits[parent] = hit.Limit;
             var outcome = await limits.OnLimitAsync(hit); // immediate, never queued behind an auto-switch buffer
             if (outcome?.Switched is { Switched: true } switched)
             {
@@ -158,18 +149,12 @@ internal sealed partial class BackendUpkeep : IDisposable
     {
         var login = ResumeStopped.DefaultLogin();
         var stops = await Task.Run(() => ResumeStopped.Scan(ResumeStopped.ConfigDirs(snap.ActiveAccountNumber), DateTime.UtcNow,
-            login.Account == snap.ActiveAccountNumber ? login.ChangedAt : DateTime.MaxValue, includeBusy: true, agentLimits: agentLimits));
+            login.Account == snap.ActiveAccountNumber ? login.ChangedAt : DateTime.MaxValue, includeBusy: true, subagentLimits: subagentLimits));
         if (ResumeStopped.LimitReport(stops, snap.Accounts, DateTimeOffset.UtcNow, reported) is { } report)
             await engine.ImportUsageAsync(report);
         foreach (var stop in stops.DistinctBy(s => s.SessionId))
         {
             if (!settings.AutoSwitch || disposed) return;
-            if (stop.Status == "agents")
-            {
-                if (stop.AtLimit && told.Add(stop.SessionId + "@" + stop.Limit?.At))
-                    notify("Agents terminal stopped at a limit", $"Reopen the agents terminal in {stop.Cwd} from the Patch Goblins menu.");
-                continue;
-            }
             var target = stop.AtLimit ? ResumeStopped.Target(stop, snap.Accounts, n => ResumeStopped.ProfileDir(n) != null,
                 EffectiveThreshold, hysteresis, DateTimeOffset.UtcNow, null, limits.RefusedUntil, LiveOrLaunching(), limits.ScopedRefusedUntil,
                 line: settings.AutoLine ? a => switchLine.For(a, stop.Model) : null, followsLogins: followsLogins) : null;

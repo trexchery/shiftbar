@@ -174,10 +174,10 @@ public sealed class LimitSwitch(Func<Snapshot?> snapshot, Func<(int? Account, Da
             lock (_chargedTo) replay = profile == null && _chargedTo.TryGetValue(window, out first) && !ResumeStopped.RanSince(hit.File, first.At);
             var refused = replay ? first.Account : ResumeStopped.Refuser(l, profile, snap.Accounts, login());
             if (!replay && profile == null && refused is { } charged)
-                lock (_chargedTo) _chargedTo[window] = (charged, l.At, ResumeStopped.AgentSession(hit.ConfigDir, hit.File) ?? Path.GetFileNameWithoutExtension(hit.File));
+                lock (_chargedTo) _chargedTo[window] = (charged, l.At, ResumeStopped.SubagentSession(hit.ConfigDir, hit.File) ?? Path.GetFileNameWithoutExtension(hit.File));
             // A refusal seen again is not logged or reported again, but the switch still happens while the default login is on the refuser (it may have come back).
             var again = !_handled.Add($"{refused?.ToString() ?? "?"}:{reset.ToUnixTimeSeconds()}");
-            if (again && (now - _lastTry < TimeSpan.FromSeconds(30) || !(refused is { } rn && (login().Account ?? snap.ActiveAccountNumber) == rn && RefusedUntil.TryGetValue(rn, out var until0) && until0 > now))) return null; // a repeat retries at most every 30 s: a burst of agents is not a burst of ungated spawns
+            if (again && (now - _lastTry < TimeSpan.FromSeconds(30) || !(refused is { } rn && (login().Account ?? snap.ActiveAccountNumber) == rn && RefusedUntil.TryGetValue(rn, out var until0) && until0 > now))) return null; // a repeat retries at most every 30 s: a burst of subagents is not a burst of ungated spawns
             if (!again) log($"limit seen {Path.GetFileName(hit.File)} acct {refused?.ToString() ?? "?"} resets {reset:u}");
             if (refused is not { } n) return new LimitOutcome(); // unattributed: only the windows are looked at
             var model = ResumeStopped.ModelOfFile(hit.File);

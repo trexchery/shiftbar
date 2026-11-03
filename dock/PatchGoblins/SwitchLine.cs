@@ -60,5 +60,5 @@ public sealed class SwitchLine
         new[] { ("five_hour", u.FiveHour), ("seven_day", u.SevenDay) }.Where(x => x.Item2 != null).Select(x => (x.Item1, x.Item2!))
             .Concat((u.Scoped ?? []).Where(w => w.Name != null).Select(w => ("scoped:" + w.Name, w)));
 
-    static string Key(Account a) => a.Provider + ":" + a.Email;
+    static string Key(Account a) => a.Email;
 }

@@ -1,4 +1,3 @@
-using System.Text.Json.Nodes;
 using PatchGoblins;
 using Xunit;
 
@@ -10,12 +9,12 @@ public class AutoPrimeTests
     static readonly DateTimeOffset Now = new(2026, 10, 18, 15, 0, 0, TimeSpan.Zero);
 
     static Account A(int n, double five = 0, DateTimeOffset? resets = null, double weekly = 10, string status = "ok", bool disabled = false,
-        bool active = false, Spend? spend = null, DateTimeOffset? fetched = null, List<Window>? scoped = null, string provider = "claude") =>
+        bool active = false, Spend? spend = null, DateTimeOffset? fetched = null, List<Window>? scoped = null) =>
         new Account(n, $"a{n}@example.com", active, status,
             status == "ok" ? new Usage(new Window(five, resets), new Window(weekly, null), scoped, spend) : null,
             LastGoodUsage: status == "ok" ? null : new Usage(new Window(0, null), new Window(1, null), null, null),
             Disabled: disabled, OrganizationUuid: "org")
-        { UsageFetchedAt = fetched ?? Now - TimeSpan.FromMinutes(1), Provider = provider };
+        { UsageFetchedAt = fetched ?? Now - TimeSpan.FromMinutes(1) };
 
     [Fact]
     public void ReadyMeansAFreshUnstartedWindowWellWithinThePlansLimits()
@@ -34,7 +33,6 @@ public class AutoPrimeTests
             A(8, scoped: [new Window(100, null, "Opus")]),
             A(9, spend: new Spend(4, 50, 8, "USD", null)), // paid extra usage on
             A(10, fetched: Now.AddMinutes(-40)), // someone may have started it since
-            A(11, provider: "codex"),
         };
         Assert.Equal([1], p.Ready(accounts, Now).Select(a => a.Number));
         // At the click, only a reading taken just now counts.
@@ -216,7 +214,7 @@ public class AutoPrimeTests
     }
 }
 
-[Collection("agents end to end")] // changes process environment variables
+[Collection("process environment")] // changes process environment variables
 public sealed class AutoPrimeEngineTests : IDisposable
 {
     readonly TempDir _tmp = new();
@@ -303,55 +301,5 @@ public class TerminalEnvironmentTests
         Assert.NotNull(fresh);
         Assert.True(fresh!.ContainsKey("PATH") && fresh.ContainsKey("USERPROFILE"));
         Assert.False(fresh.ContainsKey("CLAUDECODE")); // even though these tests may run inside one
-    }
-
-    [Fact]
-    public void TheAgentsTerminalThemeIsPatchGoblinsGreenOnTheOwnersOwnTheme()
-    {
-        using var tmp = new TempDir();
-        static JsonNode Theme(string plugin) => JsonNode.Parse(File.ReadAllText(Path.Combine(plugin, "themes", "patch-goblins.json")))!;
-        var plugin = AgentsTerminal.WriteTheme(tmp.Path, "dark-daltonized")!;
-        Assert.Equal("goblin", JsonNode.Parse(File.ReadAllText(Path.Combine(plugin, ".claude-plugin", "plugin.json")))!["name"]!.GetValue<string>());
-        // Its own commands, /goblin:needs and /goblin:goal, each with a description Claude Code lists under "/".
-        Assert.Equal(["goal.md", "needs.md"], Directory.GetFiles(Path.Combine(plugin, "commands")).Select(Path.GetFileName).Order());
-        Assert.All(Directory.GetFiles(Path.Combine(plugin, "commands")), f => Assert.StartsWith("---\ndescription: ", File.ReadAllText(f).ReplaceLineEndings("\n")));
-        var theme = Theme(plugin);
-        Assert.Equal("dark-daltonized", theme["base"]!.GetValue<string>()); // the owner's own theme underneath
-        Assert.Equal("""{"clawd_body":"#5BD25B","claude":"#6FD36F","claudeShimmer":"#A6EBA6"}""", theme["overrides"]!.ToJsonString()); // the mascot color (the goblin's green) and the brand accent, nothing else
-        // A light theme gets darker greens that read on it; auto, a custom theme or none get a dark base. Never the owner's setting.
-        var light = Theme(AgentsTerminal.WriteTheme(Path.Combine(tmp.Path, "light"), "light"));
-        Assert.Equal("light", light["base"]!.GetValue<string>());
-        Assert.Equal("#2E7D32", light["overrides"]!["clawd_body"]!.GetValue<string>());
-
-        // The goblin itself: the preload beside the session's files, handed to Claude Code's Bun runtime through BUN_OPTIONS.
-        var env = AgentsTerminal.Mascot(tmp.Path);
-        Assert.True(File.Exists(Path.Combine(tmp.Path, "mascot.js")));
-        var preload = env["BUN_OPTIONS"].Split("--preload ")[^1];
-        Assert.DoesNotContain(" ", preload); // one option: a spaced path goes in its 8.3 form
-        Assert.DoesNotContain("\\", preload); // Bun reads a backslash there as an escape
-        Assert.True(File.Exists(preload), preload);
-        foreach (var other in new[] { "auto", "custom:mine", null })
-            Assert.Equal("dark", Theme(AgentsTerminal.WriteTheme(Path.Combine(tmp.Path, (other ?? "none").Replace(":", "_")), other))["base"]!.GetValue<string>());
-    }
-
-    /// The preload swaps Claude Code's mascot rows (as its renderer writes them: runs with color and background
-    /// escapes between) for the goblin's, same widths, escapes kept; anything else, a progress bar included, passes.
-    [Fact]
-    public void TheMascotPreloadSwapsClaudesRowsForTheGoblins()
-    {
-        if (Engine.FindOnPath("node.exe") is not { } node) return;
-        using var tmp = new TempDir();
-        AgentsTerminal.Mascot(tmp.Path);
-        const string G = "\u001b[38;2;91;210;91m", B = "\u001b[48;2;0;0;0m", R = "\u001b[49m\u001b[39m";
-        var frame = $"{G} ▐\u001b[39m{G}{B}▛███▛█{R} Claude Code v2.1.307\n{G}▝▜{B}█████\u001b[49m█▀{R} Fable\n{G} ▝▝   ▝▝ {R} ~\n{G}{B}█████{R} 50%\n";
-        var js = "const {swap}=require(process.argv[1]);process.stdout.write(swap(require('fs').readFileSync(0,'utf8')))";
-        var psi = new System.Diagnostics.ProcessStartInfo(node) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true,
-            StandardOutputEncoding = System.Text.Encoding.UTF8 };
-        psi.ArgumentList.Add("-e"); psi.ArgumentList.Add(js); psi.ArgumentList.Add(Path.Combine(tmp.Path, "mascot.js"));
-        using var p = System.Diagnostics.Process.Start(psi)!;
-        using (var w = new StreamWriter(p.StandardInput.BaseStream, new System.Text.UTF8Encoding(false))) w.Write(frame);
-        var swapped = p.StandardOutput.ReadToEnd();
-        p.WaitForExit();
-        Assert.Equal($"{G}▐▖\u001b[39m{G}{B}▄▄▄▄▗▌{R} Claude Code v2.1.307\n{G}▝█{B}▄██▄█\u001b[49m▘ {R} Fable\n{G} ▝▟▟▙▙▘  {R} ~\n{G}{B}█████{R} 50%\n", swapped);
     }
 }

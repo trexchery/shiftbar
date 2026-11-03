@@ -5,7 +5,7 @@ namespace PatchGoblins.Tests;
 
 /// A usage-limit error reaching the switch: seen in a file, deduped, charged to an account, the default login moved.
 /// Synthetic accounts, files and engine calls only: nothing here touches a real login or process.
-[Collection("own process")] // one test makes this process a bridge host, which hides it from ResumeStoppedTests' scans
+[Collection("own process")] // stages windows under this process's pid, as ResumeStoppedTests does
 public class LimitWatchTests
 {
     readonly DateTimeOffset Now = DateTimeOffset.UtcNow; // per test (xunit builds one instance each), so a slow run never ages a hit past the watcher's freshness window
@@ -304,20 +304,6 @@ public class LimitWatchTests
     // ---- the windows themselves ---------------------------------------------------------------------------------
 
     [Fact]
-    public void MoveCapCountsASessionsMovesInTheLastHour()
-    {
-        var now = new DateTime(2026, 10, 20, 12, 0, 0, DateTimeKind.Utc);
-        // One stamp per move, so the same session bouncing between two accounts still adds up (an account key is overwritten).
-        var moves = new Dictionary<string, DateTime> { ["s1#2"] = now.AddMinutes(-5), ["s1#3"] = now.AddMinutes(-30),
-            [ResumeStopped.MoveStamp("s1", now.AddMinutes(-5))] = now.AddMinutes(-5), [ResumeStopped.MoveStamp("s1", now.AddMinutes(-35))] = now.AddMinutes(-35),
-            [ResumeStopped.MoveStamp("s1", now.AddMinutes(-59))] = now.AddMinutes(-59), [ResumeStopped.MoveStamp("s1", now.AddMinutes(-61))] = now.AddMinutes(-61),
-            [ResumeStopped.MoveStamp("s2", now.AddMinutes(-1))] = now.AddMinutes(-1), [ResumeStopped.MoveStamp("s10", now.AddMinutes(-1))] = now.AddMinutes(-1) };
-        Assert.Equal(ResumeStopped.MovesPerHour, ResumeStopped.MovesInLastHour(moves, "s1", now));
-        Assert.Equal(1, ResumeStopped.MovesInLastHour(moves, "s2", now));
-        Assert.Equal(0, ResumeStopped.MovesInLastHour(moves, "s9", now));
-    }
-
-    [Fact]
     public void ProfileWithARunMarkerOrALiveClaudeIsInUse()
     {
         var root = TempRoot();
@@ -439,42 +425,6 @@ public class LimitWatchTests
         Assert.Equal([2], ResumeStopped.SwitchTargets([accounts[0], accounts[1]], 1, new HashSet<int>(), none, Now, threshold: 97)); // only above it: better than nothing
     }
 
-    static StoppedSession Window(string status, string id = "s") => new(1, id, @"C:\w", @"C:\p", 1, @"C:\p\t.jsonl", AtLimit: false, Status: status);
-
-    [Fact]
-    public void AProfileIsReleasedOnlyWhenEveryWindowInItIsIdle()
-    {
-        Assert.True(ResumeStopped.Releasable([Window("idle"), Window("idle", "t")], records: 2, runs: 2));
-        Assert.True(ResumeStopped.Releasable([Window("idle")], records: 1, runs: 0)); // claude started without the wrapper
-        Assert.False(ResumeStopped.Releasable([Window("idle"), Window("busy", "t")], records: 2, runs: 2));
-        Assert.False(ResumeStopped.Releasable([Window("idle"), Window("shell", "t")], records: 2, runs: 2)); // background work would die
-        Assert.False(ResumeStopped.Releasable([Window("idle")], records: 2, runs: 2)); // one window the scan did not see as done: working, or mid-prompt
-        Assert.False(ResumeStopped.Releasable([Window("idle")], records: 1, runs: 2)); // a headless run (an agent) holds it too
-        Assert.False(ResumeStopped.Releasable([], records: 0, runs: 1));
-        Assert.False(ResumeStopped.Releasable([], records: 0, runs: 0)); // nothing to free
-    }
-
-    [Fact]
-    public void OnlyAgentRunsBesideIdleWindowsAreAskedToYieldTheProfile()
-    {
-        Assert.True(ResumeStopped.AgentsOnly([], records: 0, runs: 2, agentRuns: 2));
-        Assert.True(ResumeStopped.AgentsOnly([Window("idle")], records: 1, runs: 2, agentRuns: 1));
-        Assert.False(ResumeStopped.AgentsOnly([], records: 0, runs: 2, agentRuns: 1)); // a headless run the owner started: never stopped
-        Assert.False(ResumeStopped.AgentsOnly([Window("busy")], records: 1, runs: 2, agentRuns: 1)); // a working window holds it anyway
-        Assert.False(ResumeStopped.AgentsOnly([], records: 1, runs: 2, agentRuns: 1)); // a window the scan did not see as done
-        Assert.False(ResumeStopped.AgentsOnly([Window("idle")], records: 1, runs: 1, agentRuns: 0)); // no run holds it: Releasable's
-    }
-
-    [Fact]
-    public void WhatHoldsAProfileIsNamedForTheUser()
-    {
-        Assert.Empty(ResumeStopped.Holders([Window("idle")], records: 1, runs: 1));
-        Assert.Equal(["w (busy)", "w (shell)"], ResumeStopped.Holders([Window("idle"), Window("busy", "t"), Window("shell", "u")], records: 3, runs: 3));
-        Assert.Equal(["a window still working"], ResumeStopped.Holders([Window("idle")], records: 2, runs: 2));
-        Assert.Equal(["2 agent or headless runs"], ResumeStopped.Holders([Window("idle")], records: 1, runs: 3));
-        Assert.Equal(["the agents terminal in w"], ResumeStopped.Holders([Window("agents")], records: 1, runs: 1));
-    }
-
     [Fact]
     public void OnlyTheConsoleTheTrayOpenedIsEnded()
     {
@@ -517,8 +467,6 @@ public class LimitWatchTests
             // A window nothing identifies is never seen as done, so its profile is held and it is never closed.
             Assert.Empty(ResumeStopped.Scan([(root, 2)], DateTime.UtcNow, includeBusy: true));
             Assert.Empty(ResumeStopped.LiveTranscripts([(root, 2)], DateTime.UtcNow));
-            Assert.False(ResumeStopped.Releasable([], records: 1, runs: 1));
-            Assert.Equal(["a window still working"], ResumeStopped.Holders([], records: 1, runs: 1));
             File.WriteAllText(Path.Combine(root, "sessions", "1.json"),
                 $$"""{"pid":{{self.Id}},"sessionId":"sid","procStart":"{{self.StartTime.ToUniversalTime().ToFileTimeUtc()}}"}""");
             File.WriteAllText(Path.Combine(root, "sessions", "2.json"), """{"pid":2147483000,"sessionId":"old","procStart":"1"}""");
@@ -528,24 +476,7 @@ public class LimitWatchTests
     }
 
     [Fact]
-    public void AClaudeRunningTheAgentsBridgeIsNeverAWindowToMove()
-    {
-        var root = TempRoot();
-        try
-        {
-            Assert.DoesNotContain(Environment.ProcessId, ResumeStopped.BridgeHosts());
-            var bridge = Path.Combine(root, "patch-goblins.exe"); // stands in for `Patch Goblins agents-mcp`, a child of this "claude"
-            File.Copy(Engine.Cmd, bridge);
-            using var child = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(bridge, "/k")
-                { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true })!;
-            try { Assert.Contains(Environment.ProcessId, ResumeStopped.BridgeHosts()); }
-            finally { child.Kill(); child.WaitForExit(10_000); }
-        }
-        finally { Directory.Delete(root, true); }
-    }
-
-    [Fact]
-    public void AHeadlessAgentRunIsARunNotAWindowAndAStaleMarkerIsNotLive()
+    public void AHeadlessRunIsARunNotAWindowAndAStaleMarkerIsNotLive()
     {
         var root = TempRoot();
         try
@@ -561,7 +492,6 @@ public class LimitWatchTests
             File.WriteAllText(Path.Combine(root, "sessions", $"{self.Id}.json"),
                 $$"""{"pid":{{self.Id}},"sessionId":"sid","status":"busy","kind":"interactive","entrypoint":"sdk-cli","procStart":"{{stamp}}"}""");
             Assert.Equal((0, 1), ResumeStopped.LiveCounts(root)); // `cswap run N -- claude -p`: one run, no window
-            Assert.True(ResumeStopped.AgentsOnly([], records: 0, runs: 1, agentRuns: 1));
             Assert.Empty(ResumeStopped.Scan([(root, 2)], DateTime.UtcNow, includeBusy: true));
         }
         finally { Directory.Delete(root, true); }
@@ -592,24 +522,24 @@ public class LimitWatchTests
         var root = TempRoot();
         try
         {
-            var agent = Write(root, Path.Combine("sid", "subagents", "a.jsonl"), LimitLine(Now, Now.AddHours(1)));
-            Assert.Equal("sid", ResumeStopped.AgentSession(root, agent));
-            Assert.Null(ResumeStopped.AgentSession(root, Path.Combine(root, "projects", "C--w", "sid.jsonl")));
+            var subagent = Write(root, Path.Combine("sid", "subagents", "a.jsonl"), LimitLine(Now, Now.AddHours(1)));
+            Assert.Equal("sid", ResumeStopped.SubagentSession(root, subagent));
+            Assert.Null(ResumeStopped.SubagentSession(root, Path.Combine(root, "projects", "C--w", "sid.jsonl")));
             Stage(root, "idle", """{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"waiting on the workflow"}],"stop_reason":"tool_use"}}""");
             var main = Path.Combine(root, "projects", "C--w", "sid.jsonl");
-            File.SetLastWriteTimeUtc(main, Now.UtcDateTime.AddSeconds(-5)); // the main loop wrote nothing since the agent's error
+            File.SetLastWriteTimeUtc(main, Now.UtcDateTime.AddSeconds(-5)); // the main loop wrote nothing since the subagent's error
             var later = DateTime.UtcNow.AddSeconds(10);
             Assert.Empty(ResumeStopped.Scan([(root, 3)], later, DateTime.MinValue));
-            var agentLimit = new Limit("five_hour", Now.AddHours(1), Now);
-            var s = Assert.Single(ResumeStopped.Scan([(root, 3)], later, DateTime.MinValue, agentLimits: new Dictionary<string, Limit> { ["sid"] = agentLimit }));
+            var subagentLimit = new Limit("five_hour", Now.AddHours(1), Now);
+            var s = Assert.Single(ResumeStopped.Scan([(root, 3)], later, DateTime.MinValue, subagentLimits: new Dictionary<string, Limit> { ["sid"] = subagentLimit }));
             Assert.True(s.AtLimit);
             Assert.True(ResumeStopped.Unchanged(s)); // the main transcript is as quiet as at the scan
             // The main loop carried on after the in-place switch (it wrote since): it is not stopped, so never closed and relaunched.
             File.SetLastWriteTimeUtc(main, Now.UtcDateTime.AddSeconds(5));
-            Assert.Empty(ResumeStopped.Scan([(root, 3)], later, DateTime.MinValue, agentLimits: new Dictionary<string, Limit> { ["sid"] = agentLimit }));
-            // And an agent limit whose reset has passed stops nothing.
+            Assert.Empty(ResumeStopped.Scan([(root, 3)], later, DateTime.MinValue, subagentLimits: new Dictionary<string, Limit> { ["sid"] = subagentLimit }));
+            // And a subagent limit whose reset has passed stops nothing.
             File.SetLastWriteTimeUtc(main, Now.UtcDateTime.AddSeconds(-5));
-            Assert.Empty(ResumeStopped.Scan([(root, 3)], Now.UtcDateTime.AddHours(2), DateTime.MinValue, agentLimits: new Dictionary<string, Limit> { ["sid"] = agentLimit }));
+            Assert.Empty(ResumeStopped.Scan([(root, 3)], Now.UtcDateTime.AddHours(2), DateTime.MinValue, subagentLimits: new Dictionary<string, Limit> { ["sid"] = subagentLimit }));
         }
         finally { Directory.Delete(root, true); }
     }
@@ -743,67 +673,17 @@ public class LimitWatchTests
     }
 
     [Fact]
-    public void AnOldAgentLimitDoesNotHideAReopenedSessionsFinishedTurn()
+    public void AnOldSubagentLimitDoesNotHideAReopenedSessionsFinishedTurn()
     {
         var root = TempRoot();
         try
         {
             Stage(root, "idle", """{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}}""");
             var old = new Limit("five_hour", Now.AddHours(1), Now.AddDays(-1)); // from before this process started
-            var s = Assert.Single(ResumeStopped.Scan([(root, 3)], DateTime.UtcNow.AddSeconds(30), DateTime.MinValue, agentLimits: new Dictionary<string, Limit> { ["sid"] = old }));
+            var s = Assert.Single(ResumeStopped.Scan([(root, 3)], DateTime.UtcNow.AddSeconds(30), DateTime.MinValue, subagentLimits: new Dictionary<string, Limit> { ["sid"] = old }));
             Assert.False(s.AtLimit); // a finished turn: the threshold move still sees it
         }
         finally { Directory.Delete(root, true); }
-    }
-
-    // ---- the per-window decision ---------------------------------------------------------------------------------
-
-    static StoppedSession Stopped(string status = "idle", bool atLimit = true, string dir = @"C:\cfg") =>
-        new(1, "sid", @"C:\w", dir, 3, dir + @"\projects\w\sid.jsonl", atLimit, Status: status);
-
-    static ResumeStopped.Step Decide(StoppedSession s, int? target = 2, double idleSeconds = 60, bool recent = false, int moves = 0, bool unchanged = true) =>
-        ResumeStopped.Decide(s, TimeSpan.FromSeconds(idleSeconds), TimeSpan.FromSeconds(5), target, recent, moves, () => unchanged);
-
-    [Fact]
-    public void ABusyOrWaitingWindowIsNeverMovedWhateverElseHolds()
-    {
-        foreach (var status in new[] { "busy", "waiting" })
-        {
-            var step = Decide(Stopped(status), unchanged: true);
-            Assert.Equal(status == "waiting" ? ResumeStopped.Step.Wait : ResumeStopped.Step.Left, step); // one balloon names the left ones
-        }
-        Assert.Equal(ResumeStopped.Step.Move, Decide(Stopped())); // idle at the limit, with room: moved
-        // In a shell at the limit (a background command running): its turn is over and it cannot carry on, so moved too, but
-        // a finished turn below the limit with a background command is left alone.
-        Assert.Equal(ResumeStopped.Step.Move, Decide(Stopped("shell")));
-        Assert.Equal(ResumeStopped.Step.Ignore, Decide(Stopped("shell", atLimit: false)));
-    }
-
-    [Fact]
-    public void AWindowWaitsForTypingAndForItsOwnStateToHold()
-    {
-        Assert.Equal(ResumeStopped.Step.Wait, Decide(Stopped(), idleSeconds: 2)); // mid-keystroke: the next poll
-        Assert.Equal(ResumeStopped.Step.Wait, Decide(Stopped(), unchanged: false)); // something happened since the scan
-        var ran = false;
-        Assert.Equal(ResumeStopped.Step.NoRoom, ResumeStopped.Decide(Stopped(), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(5), null, false, 0, () => ran = true));
-        Assert.False(ran); // the last look runs only when a close is about to follow
-    }
-
-    [Fact]
-    public void ARecentOrOftenMovedWindowStaysPut()
-    {
-        Assert.Equal(ResumeStopped.Step.Recent, Decide(Stopped(), recent: true));
-        Assert.Equal(ResumeStopped.Step.Capped, Decide(Stopped(), moves: ResumeStopped.MovesPerHour));
-        Assert.Equal(ResumeStopped.Step.Move, Decide(Stopped(), moves: ResumeStopped.MovesPerHour - 1));
-    }
-
-    [Fact]
-    public void AFinishedTurnMovesOnlyOffAProfileAfterAMinuteOfQuiet()
-    {
-        Assert.Equal(ResumeStopped.Step.Ignore, Decide(Stopped(atLimit: false, dir: ResumeStopped.DefaultDir)));
-        Assert.Equal(ResumeStopped.Step.Ignore, Decide(Stopped(atLimit: false), idleSeconds: 30));
-        Assert.Equal(ResumeStopped.Step.Move, Decide(Stopped(atLimit: false)));
-        Assert.Equal(ResumeStopped.Step.Ignore, Decide(Stopped("busy", atLimit: false)));
     }
 
     // ---- shutdown and the engine gate ------------------------------------------------------------------------------

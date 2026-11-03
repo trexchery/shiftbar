@@ -8,18 +8,13 @@ public sealed class DashboardForm : Form
     readonly FlowLayoutPanel _list;
     readonly Label _title, _status;
     readonly Panel _header, _footer;
-    readonly Pill _pin, _close, _agents, _refresh;
-    readonly System.Windows.Forms.Timer _shine = new() { Interval = 40 };
-    long _shineT0;
+    readonly Pill _pin, _close, _refresh;
     readonly ToolTip _tips = new();
     string? _expandedEmail;
     Icon? _goblin;
     string _refreshed = "", _updated = "";
-    string? _team;
-    bool _visitorsOpen; // ponytail: per run, not saved; a setting if people want it kept
-    (Snapshot? Snap, string? Error, IReadOnlyList<(string Provider, Snapshot? Snap, string? Error)>? Others, IReadOnlyList<ProjectMapping>? Projects, IReadOnlyDictionary<string, Job>? Jobs) _last;
 
-    /// The refresh states: `Offline` is the one the header shows (it outranks the team's line); the rest live in the refresh button's tip.
+    /// The refresh states: `Offline` is the one the header shows; the rest live in the refresh button's tip.
     public const string Updating = "updating…", Offline = "offline";
 
     public bool Pinned { get; private set; }
@@ -28,16 +23,12 @@ public sealed class DashboardForm : Form
 
     SettingsPanel? _settings;
     public bool SettingsOpen => _settings != null;
-    /// Questions only the owner answers (starting agents, a goal's checks), asked here instead of in a popup.
-    readonly List<(string Title, string Body, TaskCompletionSource<bool> Answer)> _asks = [];
 
     public event Action<Account>? SwitchRequested;
     public event Action<Account>? TerminalRequested;
     public event Action<Account, string>? AccountAction;
     public event Action? RefreshRequested, SettingsRequested, AddRequested, Moved;
     public event Action<bool>? PinToggled;
-    /// The agents launcher: (anchor, menu) where menu is a right-click.
-    public event Action<Control, bool>? AgentsRequested;
 
     public DashboardForm()
     {
@@ -52,7 +43,7 @@ public sealed class DashboardForm : Form
         Icon = TrayIcons.App;
         Padding = new Padding(1);
 
-        // The header: the goblin, the name, and under it one live line about the team.
+        // The header: the icon, the name, and under it the refresh state.
         _header = new Panel { Dock = DockStyle.Top, Height = Ui.S(48) };
         _header.Paint += (_, e) => e.Graphics.DrawIcon(_goblin ??= new Icon(TrayIcons.App, Ui.S(24), Ui.S(24)), new Rectangle(Ui.S(14), Ui.S(12), Ui.S(24), Ui.S(24)));
         _title = new Label { Text = "Patch Goblins", Font = Ui.Font(9.5f, semibold: true), AutoSize = true, Location = new Point(Ui.S(46), Ui.S(7)) };
@@ -85,35 +76,18 @@ public sealed class DashboardForm : Form
             Padding = new Padding(Ui.S(8), 0, 0, Ui.S(4)),
         };
 
-        // The footer: one labeled Agents button (right-click for its menu) and refresh.
+        // The footer: refresh.
         _footer = new Panel { Dock = DockStyle.Bottom, Height = Ui.S(42) };
         _footer.Paint += (_, e) =>
         {
             using var pen = new Pen(Palette.Current.Border);
             e.Graphics.DrawLine(pen, Ui.S(20), 0, _footer.Width - Ui.S(20), 0);
         };
-        _agents = new Pill("Agents", PillStyle.Subtle, Ui.Agents) { TabStop = false, Location = new Point(Ui.S(14), Ui.S(6)) };
-        _agents.MouseUp += (_, e) => { if (e.Button is MouseButtons.Left or MouseButtons.Right) AgentsRequested?.Invoke(_agents, e.Button == MouseButtons.Right); };
-        _tips.SetToolTip(_agents, "Agents terminal");
         _refresh = new Pill("", PillStyle.Icon, Ui.Refresh) { TabStop = false };
         _refresh.Location = new Point(Width - Ui.S(14) - _refresh.Width, Ui.S(7));
         _refresh.Click += (_, _) => RefreshRequested?.Invoke();
         _tips.SetToolTip(_refresh, "Refresh now");
-        _footer.Controls.AddRange([_agents, _refresh]);
-        // The agents button glints every few seconds, whatever Windows' animation setting says. One timer, only while shown.
-        // 40 ms only while it sweeps; between sweeps the timer sleeps until the next one (most of every 4.5 s).
-        _shine.Tick += (_, _) =>
-        {
-            var at = (Environment.TickCount64 - _shineT0) % ShinePeriodMs;
-            Shimmer(at / (float)ShineSweepMs);
-            _shine.Interval = at < ShineSweepMs ? 40 : (int)Math.Max(40, ShinePeriodMs - at);
-        };
-        VisibleChanged += (_, _) =>
-        {
-            _shineT0 = Environment.TickCount64;
-            _shine.Enabled = Visible;
-            if (!Visible) Shimmer(-1);
-        };
+        _footer.Controls.Add(_refresh);
 
         Controls.Add(_list);
         Controls.Add(_header);
@@ -155,7 +129,7 @@ public sealed class DashboardForm : Form
     {
         var pal = Palette.Current;
         BackColor = _list.BackColor = _header.BackColor = _footer.BackColor = pal.Back;
-        _agents.BackColor = _refresh.BackColor = pal.Back; // opaque: a transparent pill is composited twice when the window is captured
+        _refresh.BackColor = pal.Back; // opaque: a transparent pill is composited twice when the window is captured
         _title.ForeColor = pal.Text;
         _status.ForeColor = pal.Muted;
         if (IsHandleCreated) Ui.ThemeWindow(_list, pal);
@@ -170,56 +144,25 @@ public sealed class DashboardForm : Form
         ShowStatus();
     }
 
-    /// The team's one-line summary ("2 working · 1 resting"), or null when there is none.
-    public void SetTeam(string? summary)
-    {
-        if (_team == summary) return;
-        _team = summary;
-        ShowStatus();
-    }
-
     internal string StatusText => _status.Text;
 
     void ShowStatus()
     {
-        _status.Text = _refreshed == Offline ? Offline : _team ?? "";
+        _status.Text = _refreshed == Offline ? Offline : "";
         _tips.SetToolTip(_refresh, _updated.Length > 0 ? "Refresh now · " + _updated : "Refresh now");
-    }
-
-    const int ShinePeriodMs = 4500, ShineSweepMs = 800;
-
-    /// Phase of the agents pill's sweep: 0 to 1 while sweeping, anything else is at rest. Repaints only the pill, and only on change.
-    internal void Shimmer(float phase)
-    {
-        var p = phase is >= 0 and <= 1 ? phase : -1;
-        if (p < 0 && _agents.Shine < 0) return;
-        _agents.Shine = p;
-        _agents.Invalidate();
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _shine.Dispose(); _tips.Dispose(); _goblin?.Dispose(); }
+        if (disposing) { _tips.Dispose(); _goblin?.Dispose(); }
         base.Dispose(disposing);
     }
 
-    /// The agents button's dot (null: nothing to show) and tooltip.
-    public void SetAgents(Color? badge, string tip)
+    /// `projects`: folder assignments; each row shows its own.
+    public void Render(Snapshot? snap, string? error, IReadOnlyList<ProjectMapping>? projects = null)
     {
-        if (_agents.Badge == badge && _tips.GetToolTip(_agents) == tip) return;
-        _agents.Badge = badge;
-        _tips.SetToolTip(_agents, tip);
-        _agents.Invalidate();
-    }
-
-    /// `others`: Codex/Grok snapshots (or their error), the visitors below the team. `projects`: folder assignments; each row shows its own.
-    /// `jobs`: what each Claude account is doing (AccountPicker.Key), the line under its name.
-    public void Render(Snapshot? snap, string? error, IReadOnlyList<(string Provider, Snapshot? Snap, string? Error)>? others = null,
-        IReadOnlyList<ProjectMapping>? projects = null, IReadOnlyDictionary<string, Job>? jobs = null)
-    {
-        _last = (snap, error, others, projects, jobs);
         // A refresh that changes nothing shown is no rebuild: tearing every row down and back up is what flickers.
-        var shown = Shown(snap, error, others, projects, jobs);
+        var shown = Fingerprint(snap, error, projects);
         if (shown == _shown && _list.Controls.Count > 0) return;
         _shown = shown;
         ApplyTheme();
@@ -231,39 +174,21 @@ public sealed class DashboardForm : Form
         // Copy first: Dispose removes the control, so enumerating live would skip every other one.
         foreach (var c in _list.Controls.Cast<Control>().ToList()) c.Dispose();
         _list.Controls.Clear();
-        foreach (var ask in _asks) _list.Controls.Add(AskCard(ask));
-        var visitors = (others ?? []).Where(o => o.Snap is { Accounts.Count: > 0 } || o.Error != null).ToList();
         var now = DateTimeOffset.Now;
-        void AddRows(Snapshot? s, Func<Account, Job?> job)
-        {
-            foreach (var a in (s?.Accounts ?? []).OrderByDescending(a => a.Active).ThenBy(a => a.Number))
-            {
-                var row = new AccountRow(a, now, projects?.Where(m => m.Matches(a)).ToList(), job(a));
-                row.SwitchClicked += x => SwitchRequested?.Invoke(x);
-                row.TerminalClicked += x => TerminalRequested?.Invoke(x);
-                row.MenuAction += (x, act) => AccountAction?.Invoke(x, act);
-                row.ExpandRequested += ToggleRow;
-                row.SizeChanged += (_, _) => FitHeight();
-                if (Key(a) == _expandedEmail) row.SetExpanded(true, animate: false);
-                _list.Controls.Add(row);
-            }
-        }
-
-        if (snap is { Accounts.Count: > 0 } || error != null) _list.Controls.Add(SectionLabel("Team"));
+        var any = snap is { Accounts.Count: > 0 };
+        if (any || error != null) _list.Controls.Add(SectionLabel("Accounts"));
         if (error != null) _list.Controls.Add(Message("Couldn't refresh · " + error));
-        AddRows(snap, a => jobs?.TryGetValue(AccountPicker.Key(a), out var j) == true ? j : null);
-        if (visitors.Count > 0)
+        foreach (var a in (snap?.Accounts ?? []).OrderByDescending(a => a.Active).ThenBy(a => a.Number))
         {
-            _list.Controls.Add(VisitorsLabel(visitors.Select(v => v.Provider)));
-            if (_visitorsOpen)
-                foreach (var (provider, s, err) in visitors)
-                {
-                    _list.Controls.Add(SectionLabel(ProviderCli.Title(provider)));
-                    if (err != null) _list.Controls.Add(Message("Couldn't refresh · " + err));
-                    AddRows(s, _ => null);
-                }
+            var row = new AccountRow(a, now, projects?.Where(m => m.Matches(a)).ToList());
+            row.SwitchClicked += x => SwitchRequested?.Invoke(x);
+            row.TerminalClicked += x => TerminalRequested?.Invoke(x);
+            row.MenuAction += (x, act) => AccountAction?.Invoke(x, act);
+            row.ExpandRequested += ToggleRow;
+            row.SizeChanged += (_, _) => FitHeight();
+            if (a.Email == _expandedEmail) row.SetExpanded(true, animate: false);
+            _list.Controls.Add(row);
         }
-        var any = snap is { Accounts.Count: > 0 } || visitors.Any(v => v.Snap is { Accounts.Count: > 0 });
         if (!any && snap == null && error == null)
             _list.Controls.Add(Message("Loading…"));
         else if (!any && error == null)
@@ -285,40 +210,25 @@ public sealed class DashboardForm : Form
     string? _shown;
 
     /// What a render would draw, as text: equal text, equal flyout. Minutes, not seconds, for times shown as "in 2h 5m".
-    string Shown(Snapshot? snap, string? error, IReadOnlyList<(string Provider, Snapshot? Snap, string? Error)>? others,
-        IReadOnlyList<ProjectMapping>? projects, IReadOnlyDictionary<string, Job>? jobs) =>
+    static string Fingerprint(Snapshot? snap, string? error, IReadOnlyList<ProjectMapping>? projects) =>
         System.Text.Json.JsonSerializer.Serialize(new
         {
             snap = snap?.Accounts.Select(a => a with { UsageAgeSeconds = null, UsageFetchedAt = null }),
             error,
-            others = others?.Select(o => new { o.Provider, accounts = o.Snap?.Accounts.Select(a => a with { UsageAgeSeconds = null, UsageFetchedAt = null }), o.Error }),
             projects,
-            jobs = jobs?.OrderBy(j => j.Key).Select(j => j.Key + "=" + j.Value),
-            asks = _asks.Count,
-            _visitorsOpen,
             minute = DateTimeOffset.Now.ToString("yyyyMMddHHmm"),
             dark = Palette.Current.IsDark,
         });
-
-    /// Opens or closes the Visitors (Codex, Grok) rows and redraws.
-    internal void SetVisitorsOpen(bool open)
-    {
-        if (_visitorsOpen == open) return;
-        _visitorsOpen = open;
-        Render(_last.Snap, _last.Error, _last.Others, _last.Projects, _last.Jobs);
-    }
 
     void ToggleRow(AccountRow row)
     {
         var open = !row.Expanded;
         foreach (var r in _list.Controls.OfType<AccountRow>()) if (r != row && r.Expanded) r.SetExpanded(false);
         row.SetExpanded(open);
-        _expandedEmail = open ? Key(row.Account) : null;
+        _expandedEmail = open ? row.Account.Email : null;
     }
 
-    static string Key(Account a) => a.Provider + ":" + a.Email;
-
-    /// Small muted caps above a group of rows: Team, then the visitors' providers once they are opened.
+    /// Small muted caps above a group of rows.
     static Label SectionLabel(string title) => new()
     {
         Text = title.ToUpperInvariant(),
@@ -328,16 +238,6 @@ public sealed class DashboardForm : Form
         AutoSize = true,
         Margin = new Padding(Ui.S(12), Ui.S(8), 0, Ui.S(2)),
     };
-
-    /// The visitors' one row: who they are, closed until clicked (Codex and Grok only show usage and switch by hand).
-    Label VisitorsLabel(IEnumerable<string> providers)
-    {
-        var label = SectionLabel((_visitorsOpen ? "– " : "+ ") + "Visitors · " + string.Join(" · ", providers.Select(ProviderCli.Title)));
-        label.ForeColor = Palette.Current.Muted;
-        label.Cursor = Cursors.Hand;
-        label.Click += (_, _) => BeginInvoke(() => SetVisitorsOpen(!_visitorsOpen)); // after the click: this label is gone once it redraws
-        return label;
-    }
 
     Label Message(string text) => new()
     {
@@ -388,49 +288,6 @@ public sealed class DashboardForm : Form
         _refresh.Left += dx;
         Width = w;
         if (!Pinned) Left = right - w;
-    }
-
-    /// Asks the owner here, on a card above the accounts, and shows the flyout. No answer within `expire` is a no.
-    public async Task<bool> Ask(string title, string body, TimeSpan expire)
-    {
-        var ask = (title, body, new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
-        _asks.Add(ask);
-        CloseSettings();
-        Rerender();
-        if (await Task.WhenAny(ask.Item3.Task, Task.Delay(expire)) != ask.Item3.Task) Answer(ask, false);
-        return await ask.Item3.Task;
-    }
-
-    void Answer((string, string, TaskCompletionSource<bool> Answer) ask, bool yes)
-    {
-        if (!_asks.Remove(ask)) return;
-        ask.Answer.TrySetResult(yes);
-        Rerender();
-    }
-
-    internal int Pending => _asks.Count;
-
-    void Rerender() => Render(_last.Snap, _last.Error, _last.Others, _last.Projects, _last.Jobs);
-
-    Control AskCard((string Title, string Body, TaskCompletionSource<bool> Answer) ask)
-    {
-        var pal = Palette.Current;
-        var w = Ui.S(AccountRow.BaseWidth - 16);
-        var card = new Panel { Width = w, BackColor = pal.Card, Margin = new Padding(Ui.S(4), Ui.S(8), 0, Ui.S(4)), Tag = "ask" };
-        var title = new Label { Text = ask.Title, Font = Ui.Font(9f, semibold: true), ForeColor = pal.Text, AutoSize = true, MaximumSize = new Size(w - Ui.S(24), 0), Location = new Point(Ui.S(12), Ui.S(10)) };
-        var body = new Label { Text = ask.Body, Font = Ui.Font(8f), ForeColor = pal.Muted, AutoSize = true, MaximumSize = new Size(w - Ui.S(24), 0), Location = new Point(Ui.S(12), title.Bottom + Ui.S(6)) };
-        card.Controls.AddRange([title, body]);
-        body.Top = title.Top + title.PreferredHeight + Ui.S(6);
-        var yes = new Pill("Approve", PillStyle.Primary) { BackColor = pal.Card };
-        var no = new Pill("Decline") { BackColor = pal.Card };
-        var y = body.Top + body.PreferredHeight + Ui.S(10);
-        yes.Location = new Point(w - Ui.S(12) - yes.Width, y);
-        no.Location = new Point(yes.Left - Ui.S(8) - no.Width, y);
-        yes.Click += (_, _) => BeginInvoke(() => Answer(ask, true)); // after the click: this card is gone once it redraws
-        no.Click += (_, _) => BeginInvoke(() => Answer(ask, false));
-        card.Controls.AddRange([yes, no]);
-        card.Height = y + yes.Height + Ui.S(12);
-        return card;
     }
 
     /// Tests pin the screen height the flyout may fill: a small CI display would otherwise cap it and hide growth.

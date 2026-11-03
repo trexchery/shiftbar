@@ -4,8 +4,7 @@ using Microsoft.Win32;
 
 namespace PatchGoblins;
 
-/// The one goblin green: the tray's dots, buttons, switches and meters, and the agents terminal's theme all read it.
-/// `Hex` is what a theme file wants; the goblin's own pixels are not here and never change.
+/// The one brand green: the tray's dots, buttons, switches and meters all read it.
 public static class Brand
 {
     public const string DarkHex = "#5BD25B", LightHex = "#2E7D32";
@@ -92,7 +91,7 @@ public static class Ui
     public static Font Icons(float pt) => new(IconFamily, pt);
 
     public const string Refresh = "\uE72C", Settings = "\uE713", More = "\uE712", Terminal = "\uE756",
-        Add = "\uE710", Check = "\uE73E", Pin = "\uE718", Unpin = "\uE77A", Close = "\uE711", Agents = "\uE99A", Chat = "\uE8BD";
+        Add = "\uE710", Check = "\uE73E", Pin = "\uE718", Unpin = "\uE77A", Close = "\uE711", Chat = "\uE8BD";
 
     public static GraphicsPath Round(RectangleF r, float radius)
     {

@@ -29,12 +29,8 @@ public sealed record Account(
     bool Disabled = false,
     DateTimeOffset? LoginExpiresAt = null,
     string? UsageError = null,
-    string? UsageNote = null,
     string? OrganizationUuid = null)
 {
-    /// "claude", "codex" or "grok"; set by Engine.ListAsync, not part of the payload.
-    [JsonIgnore] public string Provider { get; init; } = "claude";
-
     /// When the live usage reading was taken (absent when there is none).
     public DateTimeOffset? UsageFetchedAt { get; init; }
 
@@ -49,7 +45,6 @@ public sealed record Account(
     public string? StatusNote => UsageStatus switch
     {
         "ok" => null,
-        _ when UsageNote != null => UsageNote, // provider engines explain their own states
         "token_expired" => "token expired — refreshes on next Claude Code use",
         "relogin_required" => "login dead — re-enroll this account",
         "api_key" => "API key (no subscription quota)",
@@ -65,8 +60,6 @@ public sealed record Snapshot(int SchemaVersion, int? ActiveAccountNumber, List<
 public sealed record AccountRef(int? Number, string Email);
 
 public sealed record SwitchResult(bool Switched, AccountRef? From, AccountRef? To, string? Reason, string? Note = null);
-
-public sealed record HandoffResult(string Path, string Source, int Chars);
 
 public sealed record EngineError(string? Type, string? Message);
 

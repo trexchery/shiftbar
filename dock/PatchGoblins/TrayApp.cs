@@ -1,6 +1,8 @@
+using System.Globalization;
+
 namespace PatchGoblins;
 
-public sealed partial class TrayApp : ApplicationContext
+public sealed class TrayApp : ApplicationContext
 {
     readonly Engine _engine;
     readonly DockSettings _settings = DockSettings.Load();
@@ -10,8 +12,6 @@ public sealed partial class TrayApp : ApplicationContext
     readonly ContextMenuStrip _menu = new();
     Snapshot? _snap;
     string? _error;
-    // Codex / Grok: polled on the same tick, each failure kept to its own section.
-    readonly Dictionary<string, (Snapshot? Snap, string? Error)> _others = [];
     bool _busy;
     bool? _pending; // a request made during a busy pass: null none, else whether it forces a refresh
     bool _pendingAuto; // whether a request made during a busy pass wants the auto-switch and reopen steps too
@@ -20,23 +20,19 @@ public sealed partial class TrayApp : ApplicationContext
     string? _lastBlockedNotice;
     readonly Dictionary<string, DateTime> _resumed = ResumeStopped.LoadMoves(MovesPath); // "session id#account" → when it was last reopened there
     readonly HashSet<string> _told = [], _reported = []; // reported session limits and limits handed to the engine
-    readonly System.Collections.Concurrent.ConcurrentDictionary<string, Limit> _agentLimits = []; // session id → a limit error seen in its subagent/workflow files
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, Limit> _subagentLimits = []; // session id → a limit error seen in its subagent/workflow files
     readonly LimitWatch _limitWatch;
     readonly LimitSwitch _limits;
     readonly SynchronizationContext _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
     int _engineSwitches; // the engine's own auto check or a menu switch is running: a window move must not race it
     readonly SemaphoreSlim _movePass = new(1, 1); // one pass of reopening windows at a time, whoever asks
-    bool _retry, _watching; // a nudge that had to wait (typing, a window busy at its limit): look again on the next poll; a poll running
+    bool _watching; // a poll running
     double? _engineThreshold, _engineHysteresis; // the engine's own, so windows move at the line the default login switches at
     int _engineSwitchBuffer; // autoswitch.switchBufferSeconds, for the settings box
     double Threshold => _settings.AutoLine && _snap?.Accounts.FirstOrDefault(a => a.Active) is { } on
         ? _line.For(on, null) // the default login's automatic line
         : _engineThreshold ?? 97; // the one fallback for it, until the engine's is read
     readonly SwitchLine _line = new();
-    readonly Dictionary<int, DateTime> _freed = []; // account → when its `cswap run` windows were last moved to the default login
-    readonly HashSet<int> _heldNotice = []; // pinned accounts the user was told a working window holds, while a free is due
-    (int N, string Text)? _held; // this pass's held warning, shown only if the pass shows no other balloon (a second replaces the first)
-    int _notices; // balloons shown so far
     int _switches; // switches the tray made: an account list started before one is older than the state they left
 
     /// While auto-switch is on, its check runs at least this often, whatever the dashboard refresh is:
@@ -67,14 +63,12 @@ public sealed partial class TrayApp : ApplicationContext
         _dash.AccountAction += (a, act) => _ = AccountActionAsync(a, act);
         _dash.RefreshRequested += () => _ = TickAsync(runAuto: false, refresh: true);
         _dash.SettingsRequested += () => { if (_dash.SettingsOpen) _dash.CloseSettings(); else _ = ShowSettingsAsync(); };
-        _dash.AddRequested += PickProviderToAdd;
+        _dash.AddRequested += () => _ = EnrollAsync(null);
         _dash.VisibleChanged += (_, _) => { if (!_dash.Visible) _dashHiddenAt = DateTime.UtcNow; };
         _dash.PinToggled += pinned => { _settings.Pinned = pinned; SavePinnedPosition(); };
         _dash.Moved += SavePinnedPosition;
-        _dash.AgentsRequested += (anchor, menu) => { if (menu) ShowAgentsMenu(anchor); else LaunchAgents(); };
 
-        _ = Task.Run(HardenStores); // the first run after a move re-permissions every file under the data folder (worktrees too): minutes, never on the UI thread
-        if (AgentStore.HasWork(AgentStore.DefaultRoot)) EnsureAgents(); // authorized earlier: open terminals link up, other runs stop
+        _ = Task.Run(HardenStores); // the first run after a move re-permissions every file under the data folder: minutes, never on the UI thread
         _timer.Interval = TimerMs;
         _timer.Tick += (_, _) => _ = TickAsync(runAuto: true);
         _timer.Start();
@@ -134,7 +128,7 @@ public sealed partial class TrayApp : ApplicationContext
         }
         _busy = true;
         _dash.SetStatus(DashboardForm.Updating);
-        var fresh = new List<(string Provider, Snapshot Snap)>(); // this pass's readings only; a failed poll never feeds the quota alerts
+        Snapshot? fresh = null; // this pass's reading only; a failed poll never feeds the quota alerts
         try
         {
             if (runAuto && _settings.AutoSwitch)
@@ -152,10 +146,9 @@ public sealed partial class TrayApp : ApplicationContext
             if (_settings.AutoPrime && Prime.Observe(_snap.Accounts, DateTimeOffset.Now)) Prime.Save();
             if (_settings.AutoPrime && Prime.Problem != _primeProblem && (_primeProblem = Prime.Problem) != null)
                 Notify("Auto-Prime paused", _primeProblem, ToolTipIcon.Warning);
-            fresh.Add(("claude", _snap));
+            fresh = _snap;
             _engine.StatsSyncTick(Program.Log);
             if (runAuto && _settings.AutoSwitch) await ResumeStoppedAsync(_snap);
-            await UpdateAgentAccountsAsync();
             _error = null;
             _dash.SetStatus($"{DateTime.Now:HH:mm}");
         }
@@ -164,23 +157,18 @@ public sealed partial class TrayApp : ApplicationContext
             _error = Engine.Redact(e.Message);
             _dash.SetStatus(DashboardForm.Offline);
         }
-        try { await PollProvidersAsync(refresh, fresh); }
         finally
         {
             _busy = false;
         }
         AutoPrimeTick();
-        if (_settings.QuotaNotifications
-            && QuotaAlerts.Balloon(fresh.SelectMany(f => _quota.Observe(f.Provider, f.Snap.Accounts)).ToList()) is { } balloon)
+        if (_settings.QuotaNotifications && fresh != null && QuotaAlerts.Balloon(_quota.Observe(fresh.Accounts)) is { } balloon)
             Notify(balloon.Title, balloon.Text);
-        // Tray dot and tooltip follow Claude, unless Claude is unused and exactly one other provider is.
-        var withAccounts = _others.Values.Where(o => o.Snap is { Accounts.Count: > 0 }).ToList();
-        var basis = _snap is not { Accounts.Count: > 0 } && withAccounts.Count == 1 ? withAccounts[0].Snap : _snap;
-        var active = basis?.Accounts.FirstOrDefault(a => a.Active);
+        var active = _snap?.Accounts.FirstOrDefault(a => a.Active);
         var old = _tray.Icon;
         _tray.Icon = TrayIcons.WithDot(active?.ShownUsage == null ? null : Format.Peak(active), _settings.AutoSwitch);
         if (old != TrayIcons.App) old?.Dispose();
-        _tray.Text = Format.Tooltip(basis, _settings.AutoSwitch);
+        _tray.Text = Format.Tooltip(_snap, _settings.AutoSwitch);
         if (_dash.Visible) RenderDash();
         if (_pending is { } again)
         {
@@ -203,12 +191,12 @@ public sealed partial class TrayApp : ApplicationContext
     {
         var (recorded, changed) = ResumeStopped.DefaultLogin();
         var live = snap?.ActiveAccountNumber;
-        foreach (var (id, l) in _agentLimits) if (l.ResetsAt?.UtcDateTime <= DateTime.UtcNow) _agentLimits.TryRemove(id, out _); // reset: no longer a stop
-        return ResumeStopped.Scan(ResumeStopped.ConfigDirs(live), DateTime.UtcNow, recorded == live ? changed : DateTime.MaxValue, includeBusy, _agentLimits);
+        foreach (var (id, l) in _subagentLimits) if (l.ResetsAt?.UtcDateTime <= DateTime.UtcNow) _subagentLimits.TryRemove(id, out _); // reset: no longer a stop
+        return ResumeStopped.Scan(ResumeStopped.ConfigDirs(live), DateTime.UtcNow, recorded == live ? changed : DateTime.MaxValue, includeBusy, _subagentLimits);
     }
 
     /// The net under the file watchers, every couple of seconds: watchers are (re)started, live windows' files are read from
-    /// where they were last read (a missed event, or an overflow, costs nothing), and a nudge that had to wait is retried.
+    /// where they were last read (a missed event, or an overflow, costs nothing).
     async Task WatchAsync()
     {
         if (_watching || !_settings.AutoSwitch) return;
@@ -221,13 +209,12 @@ public sealed partial class TrayApp : ApplicationContext
                 _limitWatch.Sync(dirs.Select(d => d.Dir));
                 _limitWatch.Poll(ResumeStopped.LiveTranscripts(dirs, DateTime.UtcNow));
             });
-            if (_retry && _snap != null && _engineThreshold != null) await ResumeStoppedAsync(_snap); // the pass reads the threshold itself: not every 2 s while that fails
         }
         catch (Exception e) { Program.Log(e); }
         finally { _watching = false; }
     }
 
-    /// A usage-limit error was just written (any window, subagent or workflow agent): the default login leaves the refused
+    /// A usage-limit error was just written (any window, Claude Code subagent or workflow): the default login leaves the refused
     /// account within a second or two, from the latest reading, then windows stopped at the limit are reopened. Nothing
     /// waits for a refresh, a tray pass or a quiet spell.
     async Task OnLimitAsync(LimitHit hit)
@@ -236,7 +223,7 @@ public sealed partial class TrayApp : ApplicationContext
         try
         {
             // A hit in a subagent or workflow file stops its window too: mark the session for the move pass.
-            if (ResumeStopped.AgentSession(hit.ConfigDir, hit.File) is { } agentOf) _agentLimits[agentOf] = hit.Limit;
+            if (ResumeStopped.SubagentSession(hit.ConfigDir, hit.File) is { } sessionOf) _subagentLimits[sessionOf] = hit.Limit;
             if (_snap == null) { _ = TickAsync(runAuto: true); return; } // no reading yet: the tray pass lists, then looks at the windows
             var o = await _limits.OnLimitAsync(hit); // null: seen before; the windows are still looked at
             if (o?.Switched is { Switched: true } sw)
@@ -253,7 +240,7 @@ public sealed partial class TrayApp : ApplicationContext
             }
             else if (o?.Error != null)
             {
-                if (o.Error != _lastBlockedNotice) // once, not per refusal: every window and agent keeps hitting it until the login moves
+                if (o.Error != _lastBlockedNotice) // once, not per refusal: every window keeps hitting it until the login moves
                 {
                     _lastBlockedNotice = o.Error;
                     Notify("Auto-switch can't move the default login", o.Error, ToolTipIcon.Warning);
@@ -279,56 +266,7 @@ public sealed partial class TrayApp : ApplicationContext
         catch (Exception e) when (e is EngineException or IOException) { Program.Log(e); }
     }
 
-    async Task PollProvidersAsync(bool refresh, List<(string Provider, Snapshot Snap)> fresh)
-    {
-        foreach (var p in ProviderCli.All)
-        {
-            if (!ProviderCli.Present(p)) { _others.Remove(p); continue; }
-            try
-            {
-                var s = await _engine.ListAsync(refresh, p);
-                _others[p] = (s, null);
-                fresh.Add((p, s));
-            }
-            catch (Exception e) { _others[p] = (_others.GetValueOrDefault(p).Snap, Engine.Redact(e.Message)); }
-        }
-    }
-
-    Dictionary<string, Job> _jobs = [];
-    HashSet<int> _live = [];
-
-    void RenderDash()
-    {
-        _jobs = TeamJobs();
-        _dash.SetTeam(Jobs.Summary(_jobs.Values, _agents?.Repos ?? []));
-        _dash.Render(_snap, _error, ProviderCli.All.Where(_others.ContainsKey).Select(p => (p, _others[p].Snap, _others[p].Error)).ToList(), ProjectMap.Load(), _jobs);
-    }
-
-    /// What each Claude account is doing: an agent run, the owner's own use, rest, or nothing.
-    Dictionary<string, Job> TeamJobs() =>
-        _snap is { } s ? Jobs.For(s.Accounts, _agents?.Repos ?? [], _live, Threshold, DateTimeOffset.Now, a => _agents?.CooledUntil(a)) : [];
-
-    /// The agents moved between ticks: the header's line follows at once, and the flyout is redrawn only if a job line changed.
-    void RefreshTeam()
-    {
-        _dash.SetTeam(Jobs.Summary(_jobs.Values, _agents?.Repos ?? []));
-        var jobs = TeamJobs();
-        if (jobs.Count == _jobs.Count && jobs.All(kv => _jobs.TryGetValue(kv.Key, out var j) && j == kv.Value)) return;
-        RenderDash();
-    }
-
-    /// "+" with several CLIs installed: a small themed menu picks which provider to add.
-    void PickProviderToAdd()
-    {
-        var installed = ProviderCli.All.Where(p => ProviderCli.Find(p) != null).ToList();
-        if (installed.Count == 0) { _ = EnrollAsync(null); return; }
-        var menu = new ContextMenuStrip();
-        foreach (var p in installed.Prepend("claude"))
-            menu.Items.Add(ProviderCli.Title(p) + " account…", null, (_, _) => _ = EnrollAsync(null, p));
-        MenuRenderer.Apply(menu);
-        MenuRenderer.DisposeOnClose(menu);
-        menu.Show(Cursor.Position);
-    }
+    void RenderDash() => _dash.Render(_snap, _error, ProjectMap.Load());
 
     async Task AutoTickAsync()
     {
@@ -354,14 +292,13 @@ public sealed partial class TrayApp : ApplicationContext
                     Notify("Account needs re-enrollment", $"{e.Email}: {e.Reason}", ToolTipIcon.Warning);
                     break;
                 // The engine never moves the default login onto an account a pinned terminal is using
-                // (two copies of one rotating login). Say so once, rather than leave a silent stall:
-                // windows stopped at the limit are reopened on that account instead, and the account is freed once its windows are idle.
+                // (two copies of one rotating login). Say so once, rather than leave a silent stall.
                 case "no-switch" when e.Reason == "no-viable-target" && _lastBlockedNotice != e.Reason:
                 case "error" when _lastBlockedNotice != e.Message:
                     _lastBlockedNotice = e.Event == "error" ? e.Message : e.Reason;
                     Notify("Auto-switch can't move the default login",
                         e.Event == "error" ? e.Message ?? "engine error"
-                            : "Every account with room left is in use by a pinned terminal. Windows stopped at a limit are reopened there instead; once that terminal is idle, it is moved to the default login and the default login follows.",
+                            : "Every account with room left is in use by a pinned terminal. Close or move that terminal's session when it is safe, and the default login can follow.",
                         ToolTipIcon.Warning);
                     break;
                 case "all-exhausted" when e.EarliestResetAt != _lastExhaustedNotice:
@@ -379,13 +316,7 @@ public sealed partial class TrayApp : ApplicationContext
     async Task ResumeStoppedAsync(Snapshot snap)
     {
         await _movePass.WaitAsync();
-        try
-        {
-            (_held, var shown) = (null, _notices);
-            await MovePassAsync(_snap ?? snap);
-            if (_held is { } h && _notices == shown && _heldNotice.Add(h.N))
-                Notify($"#{h.N} is held by a pinned terminal", h.Text, ToolTipIcon.Warning);
-        }
+        try { await MovePassAsync(_snap ?? snap); }
         finally { _movePass.Release(); }
     }
 
@@ -395,17 +326,12 @@ public sealed partial class TrayApp : ApplicationContext
         try { stopped = await Task.Run(() => ScanStops(snap, includeBusy: true)); }
         catch (Exception e) { Program.Log(e); return; }
         if (_engineThreshold == null) await ReadEngineThresholdAsync();
-        if (await FreePinnedAsync(snap)) { _retry = true; return; }
-        _retry = false;
         foreach (var s in stopped.Where(s => s.AtLimit))
         {
             var key = $"{s.SessionId}@{s.Limit?.ResetsAt ?? s.Limit?.At}";
             if (!_told.Add(key)) continue;
             var folder = Path.GetFileName(s.Cwd.TrimEnd('\\', '/'));
-            var guidance = s.Status == "agents"
-                ? "Reopen it from the Agents menu when you are ready."
-                : "When it is safe, reopen or resume the session on an account with room.";
-            Notify("Terminal stopped at a limit", $"{folder} has reached a usage limit. {guidance}", ToolTipIcon.Warning);
+            Notify("Terminal stopped at a limit", $"{folder} has reached a usage limit. When it is safe, reopen or resume the session on an account with room.", ToolTipIcon.Warning);
         }
         await RecoverOrphansAsync(snap, stopped.Where(s => s.Orphan).ToList());
     }
@@ -454,68 +380,6 @@ public sealed partial class TrayApp : ApplicationContext
         }
     }
 
-    /// An account held by any interactive session stays pinned. Only known headless agent
-    /// runs may yield it; an unrecognized holder is always left alone.
-    async Task<bool> FreePinnedAsync(Snapshot snap)
-    {
-        var (threshold, hysteresis) = (Threshold, _engineHysteresis ?? 10);
-        var due = ResumeStopped.FreeTargets(snap.Accounts, LiveOrLaunching(), _limits.RefusedUntil, DateTimeOffset.UtcNow, threshold, hysteresis);
-        if (due.Count == 0) _heldNotice.Clear();
-        foreach (var n in due)
-            if (await FreePinnedAsync(snap, n)) return true;
-        return false;
-    }
-
-    async Task<bool> FreePinnedAsync(Snapshot snap, int n)
-    {
-        void Held(string text) { if (!_heldNotice.Contains(n)) _held = (n, text); }
-        if (ResumeStopped.ProfileDir(n) is not { } dir) return false;
-        if (_freed.TryGetValue(n, out var last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(30))
-        {
-            Held($"#{n} was freed recently and is in use again. It will not be freed repeatedly.");
-            return false;
-        }
-        var account = snap.Accounts.First(a => a.Number == n);
-        bool agents;
-        try
-        {
-            var windows = await Task.Run(() => ResumeStopped.Scan([(dir, n)], DateTime.UtcNow, includeBusy: true, agentLimits: _agentLimits));
-            var (records, runs) = await Task.Run(() => ResumeStopped.LiveCounts(dir));
-            agents = ResumeStopped.AgentsOnly(windows, records, runs, _agents?.RunsOn(account) ?? 0);
-            if (windows.Count > 0 || !agents)
-            {
-                var holders = ResumeStopped.Holders(windows, records, runs);
-                if (holders.Count > 0 || windows.Count > 0)
-                    Held($"#{n} is in use by a terminal or another process. Close or move that session yourself when it is safe to free the account.");
-                return false;
-            }
-        }
-        catch (Exception e) { Program.Log(e); return false; }
-
-        if (!ResumeStopped.DefaultProfileClear(ResumeStopped.DefaultDir))
-        {
-            Held("The default login is in use or its sessions cannot be inspected. Agents keep working until it is safe to switch.");
-            return false;
-        }
-        _freed[n] = DateTime.UtcNow;
-        try
-        {
-            await _agents!.YieldAsync(account, TimeSpan.FromMinutes(30));
-            var free = false;
-            for (var i = 0; i < 60 && !(free = await Task.Run(() => ResumeStopped.LiveProfiles([(dir, n)]).Count == 0)); i++) await Task.Delay(500);
-            if (!free || !_settings.AutoSwitch || _limits.Switching || _engineSwitches > 0) return true;
-            var sw = await _engine.SwitchNowAsync(n);
-            if (sw is { Switched: true })
-            {
-                _lastBlockedNotice = null;
-                Notify($"Agents freed #{n} for the default login", $"{Format.SwitchNotice(sw.From, sw.To)}. Agents continue their work on another account.");
-                Switched(n);
-            }
-        }
-        catch (Exception e) { Program.Log(e); }
-        return true;
-    }
-
     /// The tray just moved the default login to `n`: the listed state says so at once, and no list started before it replaces it.
     void Switched(int n)
     {
@@ -525,12 +389,9 @@ public sealed partial class TrayApp : ApplicationContext
 
     static string MovesPath => Path.Combine(DockSettings.Dir, "resumed.json");
 
-    static string Name(AccountRef? r) => r == null ? "(none)" : $"#{r.Number} {r.Email}";
-
     /// A small Patch Goblins card at the bottom right (not Windows' balloon); a click opens the flyout.
     void Notify(string title, string text, ToolTipIcon icon = ToolTipIcon.Info)
     {
-        _notices++;
         Toast.Show(title, Engine.Redact(text), icon switch { ToolTipIcon.Warning => Palette.Warn, ToolTipIcon.Error => Palette.Critical, _ => null }, ShowDashboard);
     }
 
@@ -550,26 +411,13 @@ public sealed partial class TrayApp : ApplicationContext
         _menu.Items.Add(sw);
         _menu.Items.Add("Add account…", null, (_, _) => _ = EnrollAsync(null));
 
-        MenuHeader("Work");
-        _menu.Items.Add("New agent", null, (_, _) => OpenNewAgent());
-        if (_agents?.Repos.Count > 0)
-        {
-            var agents = new ToolStripMenuItem("Agents");
-            AddAgentItems(agents.DropDownItems);
-            _menu.Items.Add(agents);
-        }
+        MenuHeader("Terminals");
         // The folder's assigned account if it has one, else the default login: the dashboard's Terminal path.
         _menu.Items.Add("Open terminal", null, (_, _) => OpenFolderTerminal());
         var proj = new ToolStripMenuItem("Project terminals");
         foreach (var m in ProjectMap.Load())
             proj.DropDownItems.Add(new ToolStripMenuItem($"{m.Leaf} · {m.Email}", null, (_, _) => OpenProjectTerminal(m)) { ToolTipText = m.Folder });
         if (proj.HasDropDownItems) _menu.Items.Add(proj);
-        var cont = new ToolStripMenuItem("Continue interrupted work");
-        foreach (var src in ProviderCli.Every)
-            foreach (var t in ProviderCli.HandoffTargets(src))
-                cont.DropDownItems.Add($"{ProviderCli.Title(src)} → {ProviderCli.Title(t)}…", null, (_, _) => _ = ContinueAsync(src, t));
-        cont.Enabled = cont.HasDropDownItems;
-        _menu.Items.Add(cont);
 
         MenuHeader("Upkeep");
         _menu.Items.Add(new ToolStripMenuItem("Auto-switch near limit", null, (_, _) => SetAutoSwitch(!_settings.AutoSwitch)) { Checked = _settings.AutoSwitch });
@@ -578,11 +426,11 @@ public sealed partial class TrayApp : ApplicationContext
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add("Refresh now", null, (_, _) => _ = TickAsync(runAuto: false, refresh: true));
         _menu.Items.Add("Settings…", null, (_, _) => _ = ShowSettingsAsync());
-        _menu.Items.Add("Exit", null, (_, _) => _ = ExitAsync());
+        _menu.Items.Add("Exit", null, (_, _) => ExitThread());
         MenuRenderer.Apply(_menu);
     }
 
-    /// A quiet group name between separators: the same Team / Work / Upkeep as the settings.
+    /// A quiet group name between separators.
     void MenuHeader(string title)
     {
         _menu.Items.Add(new ToolStripSeparator());
@@ -655,19 +503,6 @@ public sealed partial class TrayApp : ApplicationContext
 
     async Task SwitchAsync(Account a)
     {
-        if (a.Provider != "claude")
-        {
-            // Only the login file is rewritten atomically; running sessions are never touched.
-            try
-            {
-                var pr = await _engine.SwitchAsync(a.Number, a.Provider);
-                Notify(pr.Switched ? $"Switched {ProviderCli.Title(a.Provider)} account" : "No switch",
-                    pr.Switched ? $"Now using {Name(pr.To)}. {pr.Note}" : pr.Reason ?? "Already active");
-            }
-            catch (Exception e) { Error("Switch failed", e); }
-            await TickAsync(runAuto: false);
-            return;
-        }
         var running = ClaudeCli.RunningCount();
         if (running > 0 && MessageBox.Show(
                 $"{running} Claude Code process(es) are running.\n\n" +
@@ -695,14 +530,6 @@ public sealed partial class TrayApp : ApplicationContext
     {
         try
         {
-            if (a.Provider != "claude")
-            {
-                var title = $"{ProviderCli.Title(a.Provider)} · {a.Email}";
-                // The live login runs the plain CLI: `run` refuses it, since two copies would share a single-use refresh token.
-                if (a.Active && ProviderCli.Find(a.Provider) is { } cli) Engine.LaunchConsoleWith(cli, title, folder);
-                else _engine.LaunchConsole(title, folder, a.Provider, "run", a.Number.ToString());
-                return;
-            }
             // `cswap run N` pins this console to account N via an isolated profile; global switches
             // and auto-switch never touch it. When N is the active login, the engine runs plain `claude`
             // instead (no second copy of the refresh token), which follows later switches.
@@ -724,17 +551,6 @@ public sealed partial class TrayApp : ApplicationContext
         catch (Exception e) { Error("Could not open terminal", e); }
     }
 
-    /// A plain Claude session on the default login in the general folder (the Agents button's menu, and Work in the tray menu).
-    void OpenNewAgent()
-    {
-        try
-        {
-            Directory.CreateDirectory(Launch.GeneralFolder);
-            _engine.LaunchConsole("Claude · new agent", Launch.GeneralFolder, Launch.Run(null, _settings.PreserveRemoteControl));
-        }
-        catch (Exception e) { Error("Could not open terminal", e); }
-    }
-
     /// With "Use project accounts automatically", the account assigned to `folder` (else null).
     Account? MappedAccount(string folder) =>
         _settings.AutoProjectAccount ? ProjectMap.AccountFor(folder, _snap?.Accounts ?? [], ProjectMap.Load()) : null;
@@ -747,50 +563,15 @@ public sealed partial class TrayApp : ApplicationContext
         catch (Exception e) { Error("Could not open terminal", e); }
     }
 
-    /// Starts a new session in `target` with notes from the interrupted `source` session.
-    /// Not a resume: the notes are built locally and Patch Goblins sends nothing; the
-    /// target agent reads them like any prompt.
-    async Task ContinueAsync(string source, string target)
-    {
-        if (PickFolder($"Folder of the interrupted {ProviderCli.Title(source)} work") is not { } folder) return;
-        try
-        {
-            var exe = ProviderCli.FindAny(target) ?? throw new EngineException($"{ProviderCli.Title(target)} CLI not found.");
-            var h = await _engine.HandoffAsync(source, folder);
-            var prompt = $"Read the hand-off notes in {h.Path} and continue the interrupted task.";
-            var mapped = target == "claude" ? MappedAccount(folder) : null;
-            var who = mapped ?? (target == "claude" ? _snap : _others.GetValueOrDefault(target).Snap)?.Accounts.FirstOrDefault(a => a.Active);
-            var title = $"{ProviderCli.Title(target)} · continue" + (who == null ? "" : " · " + who.ShortName);
-            if (target == "grok")
-            {
-                // ponytail: no known initial-prompt argument for grok; pass it as an arg once one exists.
-                Clipboard.SetText(prompt);
-                Engine.LaunchConsoleWith(exe, title, folder);
-                Notify("Hand-off ready", "Paste the copied line into Grok to start with the notes.");
-                return;
-            }
-            // Claude goes through `cswap run` so Remote Control can be restored. In a folder assigned to an
-            // account the engine picks it itself; else the active account, which runs plain claude. No known account: direct.
-            if (target == "claude" && Launch.Continue(mapped, who, _settings.PreserveRemoteControl, prompt) is { } run)
-                _engine.LaunchConsole(title, folder, run);
-            else Engine.LaunchConsoleWith(exe, title, folder, prompt);
-            Notify("Hand-off ready", $"New {ProviderCli.Title(target)} session started with notes from the interrupted one.");
-        }
-        catch (Exception e) { Error("Could not continue", e); }
-    }
-
     async Task AccountActionAsync(Account a, string action)
     {
         try
         {
             switch (action)
             {
-                case not null when action.StartsWith("continue:"):
-                    await ContinueAsync(a.Provider, action["continue:".Length..]);
-                    return;
                 case "terminal-folder":
                     if (PickFolder($"Open a terminal as #{a.Number} in…", _settings.TerminalFolder ?? StoreSecurity.UserProfile) is { } f)
-                        OpenTerminal(a.Provider == "claude" ? MappedAccount(f) ?? a : a, f);
+                        OpenTerminal(MappedAccount(f) ?? a, f);
                     return;
                 case "map":
                     if (PickFolder($"Project folder for #{a.Number} (`cswap run` there uses this account)") is not { } m) return;
@@ -815,14 +596,8 @@ public sealed partial class TrayApp : ApplicationContext
                         : ["alias", a.Number.ToString(), alias]);
                     break;
                 case "reenroll":
-                    await EnrollAsync(a, a.Provider);
+                    await EnrollAsync(a);
                     return;
-                case "remove" when a.Provider != "claude":
-                    if (MessageBox.Show($"Remove {ProviderCli.Title(a.Provider)} #{a.Number} {a.Email} from Patch Goblins?\n\n" +
-                                        "Its stored login is deleted. The current login is not logged out.",
-                            "Patch Goblins", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-                    await _engine.CommandAsync(a.Provider, "remove", a.Number.ToString(), "--json");
-                    break;
                 case "remove":
                     if (MessageBox.Show($"Remove #{a.Number} {a.Email} from Patch Goblins?\n\nIts stored backup is deleted. " +
                                         "Your current Claude Code login is not logged out.",
@@ -835,29 +610,8 @@ public sealed partial class TrayApp : ApplicationContext
         await TickAsync(runAuto: false);
     }
 
-    async Task EnrollAsync(Account? existing, string provider = "claude")
+    async Task EnrollAsync(Account? existing)
     {
-        if (provider != "claude")
-        {
-            var title = ProviderCli.Title(provider);
-            if (MessageBox.Show(
-                    (existing == null ? $"Add a {title} account.\n\n" : $"Log in again as {existing.Email}.\n\n") +
-                    $"A console opens with the official login (`{provider} login`). Sign in in the browser " +
-                    "(a private window avoids approving the account you're already signed in with).\n\n" +
-                    "This uses a separate, temporary profile: your current login and running sessions are not affected.",
-                    "Patch Goblins", MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK) return;
-            try
-            {
-                // First account: keep the login already on this machine too (errors when there is none).
-                if (_others.GetValueOrDefault(provider).Snap is not { Accounts.Count: > 0 })
-                    try { await _engine.CommandAsync(provider, "add-current", "--json"); } catch (EngineException) { }
-                await ProviderCli.EnrollAsync(_engine, provider);
-                Notify("Account enrolled", $"{title} account added.");
-            }
-            catch (Exception e) { Error("Enrollment failed", e); }
-            await TickAsync(runAuto: false);
-            return;
-        }
         if (MessageBox.Show(
                 (existing == null ? "Add a Claude account.\n\n" : $"Log in again as {existing.Email}.\n\n") +
                 "A console opens with the official Claude Code login (`claude auth login`).\n\n" +
@@ -924,11 +678,6 @@ public sealed partial class TrayApp : ApplicationContext
         f.TerminalFolder.Text = _settings.TerminalFolder ?? "";
         f.QuotaNotify.Checked = _settings.QuotaNotifications;
         f.AutoPrime.Checked = _settings.AutoPrime;
-        f.AgentIssues.Value = Math.Clamp(_settings.AgentIssues, (int)f.AgentIssues.Minimum, (int)f.AgentIssues.Maximum);
-        f.AgentOpenPrs.Value = Math.Clamp(_settings.AgentOpenPrs, (int)f.AgentOpenPrs.Minimum, (int)f.AgentOpenPrs.Maximum);
-        f.DraftPrs.Checked = _settings.AgentDraftPrs;
-        f.Ultracode.Checked = _settings.AgentUltracode;
-        f.AskApproval.Checked = _settings.AskApproval;
         f.CancelClicked += _dash.CloseSettings;
         f.SaveClicked += () => _ = SaveSettingsAsync(f);
         if (!_dash.Visible) ShowDashboard();
@@ -946,13 +695,7 @@ public sealed partial class TrayApp : ApplicationContext
             if (f.QuotaNotify.Checked != _settings.QuotaNotifications) _quota = new(); // switching on starts from a fresh, silent baseline
             _settings.QuotaNotifications = f.QuotaNotify.Checked;
             _settings.AutoPrime = f.AutoPrime.Checked;
-            _settings.AgentIssues = (int)f.AgentIssues.Value;
-            _settings.AgentOpenPrs = (int)f.AgentOpenPrs.Value;
-            _settings.AgentDraftPrs = f.DraftPrs.Checked;
-            _settings.AgentUltracode = f.Ultracode.Checked;
-            _settings.AskApproval = f.AskApproval.Checked;
             _settings.AutoLine = f.AutoLine.Checked;
-            ApplyAgentSettings();
             _settings.Save();
             _timer.Interval = TimerMs;
             var autoSwitch = f.AutoSwitch.Checked;
@@ -961,7 +704,7 @@ public sealed partial class TrayApp : ApplicationContext
             if (threshold != _engineThreshold)
             {
                 await _engine.CommandAsync("config", "set", "autoswitch.threshold", threshold.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                await ReadEngineThresholdAsync(); // agents follow the engine's threshold
+                await ReadEngineThresholdAsync();
             }
             var buffer = (int)f.SwitchBuffer.Value;
             if (buffer != _engineSwitchBuffer)
@@ -971,6 +714,25 @@ public sealed partial class TrayApp : ApplicationContext
             }
         }
         catch (Exception e) { _dash.CloseSettings(); Error("Could not save settings", e); }
+    }
+
+    /// Window moves use the engine's own auto-switch threshold, so both agree on "near the limit".
+    async Task ReadEngineThresholdAsync()
+    {
+        try
+        {
+            var cfg = await _engine.ConfigAsync();
+            if (double.TryParse(cfg.GetValueOrDefault("autoswitch.threshold"), NumberStyles.Float, CultureInfo.InvariantCulture, out var t))
+                _engineThreshold = t;
+            if (double.TryParse(cfg.GetValueOrDefault("autoswitch.hysteresisPct"), NumberStyles.Float, CultureInfo.InvariantCulture, out var h))
+                _engineHysteresis = h;
+            if (int.TryParse(cfg.GetValueOrDefault("autoswitch.switchBufferSeconds"), NumberStyles.Integer, CultureInfo.InvariantCulture, out var b))
+                _engineSwitchBuffer = b;
+            ResumeStopped.Models = (cfg.GetValueOrDefault("autoswitch.model") ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception e) when (e is EngineException or System.Text.Json.JsonException or KeyNotFoundException or InvalidOperationException
+            or System.ComponentModel.Win32Exception or IOException) { Program.Log(e); } // never faulted: every tick awaits it
     }
 
     static string? PickFolder(string description, string? start = null)
@@ -988,8 +750,6 @@ public sealed partial class TrayApp : ApplicationContext
         _timer.Stop();
         _watch.Stop();
         _limitWatch.Dispose();
-        _link?.Dispose();
-        _agents?.Dispose(); // workers keep running; the next start re-attaches them, or stops them without their terminal
         _tray.Visible = false;
         _tray.Dispose();
         _dash.Dispose();
