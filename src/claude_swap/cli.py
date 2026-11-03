@@ -1026,20 +1026,11 @@ def _menubar_service(args) -> int:
 def main() -> None:
     """Main entry point for the CLI."""
     if sys.platform == "win32":
-        # shutil.which must not pick up a claude/codex/grok planted in the cwd.
+        # shutil.which must not pick up a claude planted in the cwd.
         os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
     force_utf8_output()
     _use_native_tls()
     argv = sys.argv[1:]
-    # Other providers' engines (Codex CLI, Grok Build) own their whole subtree.
-    if argv and argv[0] in ("codex", "grok"):
-        import importlib
-
-        sys.exit(importlib.import_module(f"claude_swap.providers.{argv[0]}").main(argv[1:]))
-    if argv and argv[0] == "handoff":
-        from claude_swap import handoff
-
-        sys.exit(handoff.main(argv[1:]))
     if argv and argv[0] == "stats-sync":
         from claude_swap import stats_merge
 

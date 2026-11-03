@@ -39,6 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -56,7 +57,6 @@ from claude_swap.exceptions import (
     SessionError,
 )
 from claude_swap.fsutil import replace_with_retry
-from claude_swap.handoff import _newest, project_dir_name
 from claude_swap.locking import FileLock
 from claude_swap.models import Platform
 from claude_swap.paths import get_claude_config_home, get_default_global_config_path
@@ -66,6 +66,23 @@ from claude_swap.settings import atomic_write_json
 
 if TYPE_CHECKING:
     from claude_swap.switcher import ClaudeAccountSwitcher
+
+
+def _newest(paths) -> Path | None:
+    best = None
+    for p in paths:
+        try:
+            m = p.stat().st_mtime
+        except OSError:
+            continue
+        if best is None or m > best[0]:
+            best = (m, p)
+    return best[1] if best else None
+
+
+def project_dir_name(project: str | Path) -> str:
+    # Claude Code names the folder after the cwd with every non-alphanumeric char as '-'.
+    return re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(project))
 
 # Items mirrored from ~/.claude into session profiles when sharing is on.
 # Deliberately excludes anything account- or instance-scoped: plugins/,
