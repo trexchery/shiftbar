@@ -157,6 +157,19 @@ public class InputBoxTests
         Assert.Equal(BoxState.Empty, Parse(Screen(Rule(), "❯", Rule(), "  ⏵⏵ accept edits on"), W).State);
     }
 
+    /// The exact shapes read from Claude Code 2.1.317 consoles (187 wide): the top rule carries a label near its right end.
+    [Fact]
+    public void ALabelledTopRuleIsTheRealBox()
+    {
+        const int w = 187;
+        var top = new string('─', 175) + " auto-mode ─";
+        string[] screen = ["● Done with that turn.", "", top, "❯", new string('─', w), "  ⏵⏵ auto mode on (shift+tab to cycle)"];
+        Assert.Equal(BoxState.Empty, Parse(screen, w).State);
+        Assert.Equal(BoxState.Text, Parse(["● Done.", "", top, "❯ fix the build", new string('─', w)], w).State);
+        // A row of text that merely contains dashes is still no rule.
+        Assert.Equal(BoxState.Unrecognised, Parse(["● Done.", "", "a ──────────────────────────────────────────────────────────────────────────────────────────────── b", "❯", "x"], w).State);
+    }
+
     [Fact]
     public void TextInTheBoxIsNotEmptyAndNeverShown()
     {

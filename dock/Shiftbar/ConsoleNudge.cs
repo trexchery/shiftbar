@@ -87,10 +87,14 @@ public static class ConsoleNudge
         return i < row.Length && (row[i] is '>' or '❯') && (i + 1 == row.Length || row[i + 1] == ' ') ? i : -1;
     }
 
+    /// A full-width '─' rule. Claude Code 2.1.317 labels the box's top rule near its right end ("───…─── auto-mode ─"), so a
+    /// rule may carry a label in its last quarter, after an unbroken run of '─' over three quarters of the width, and must
+    /// end with '─'. A rule broken earlier (or a row that merely contains dashes) is no rule.
     static bool IsRule(string row, int width)
     {
         var t = row.Trim();
-        return t.Length >= Math.Max(8, width / 2) && t.All(c => c == '─');
+        var lead = t.TakeWhile(c => c == '─').Count();
+        return t.Length >= Math.Max(8, width / 2) && t[^1] == '─' && (lead == t.Length || lead >= Math.Max(8, width * 3 / 4));
     }
 
     /// The probe's redacted outline of the last 20 drawn rows: R rule, P prompt line, t anything else, . blank.
@@ -178,11 +182,15 @@ public static class ConsoleNudge
     {
         try
         {
-            var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8 };
+            // Both streams redirected: once attached, anything the helper (or the .NET runtime, on a crash) writes to an
+            // unredirected stream would land on the user's Claude Code window.
+            var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true,
+                RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
             foreach (var a in new[] { "rc-nudge", pid.ToString(), sessionId }.Concat(manual ? ["--manual"] : [])) psi.ArgumentList.Add(a);
             foreach (var (k, v) in env ?? new Dictionary<string, string>()) psi.Environment[k] = v;
             using var p = Process.Start(psi) ?? throw new InvalidOperationException("not started");
             var read = p.StandardOutput.ReadToEndAsync();
+            _ = p.StandardError.ReadToEndAsync(); // drained so a chatty crash can't block the helper
             try { await p.WaitForExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(30)).Token); }
             catch (OperationCanceledException) { try { p.Kill(); } catch (InvalidOperationException) { } return "error timeout"; }
             return (await read).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "error no-output";
