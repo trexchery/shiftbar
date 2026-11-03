@@ -23,7 +23,35 @@ public class RemoteControlTests
         var lines = new[] { Status, Bridge(A), Typed, Done, Bridge(A, "cse_01") };
         Assert.Equal((true, A), RemoteControl.Bridge(lines));
         Assert.True(RemoteControl.Dropped(RemoteControl.Bridge(lines), was: A, now: B));
-        Assert.True(RemoteControl.Dropped(RemoteControl.Bridge(lines), was: null, now: B)); // the previous login unknown: not the new one is enough
+        Assert.False(RemoteControl.Dropped(RemoteControl.Bridge(lines), was: null, now: B)); // the previous login unknown: no proof
+    }
+
+    [Fact]
+    public void ARecordFromAnEarlierRunOfAResumedSessionDoesNotCount()
+    {
+        static string At(string ts) => $$"""{"type":"user","message":{"role":"user","content":"go on"},"timestamp":"{{ts}}"}""";
+        var started = new DateTime(2026, 11, 3, 9, 0, 0, DateTimeKind.Utc);
+        // Yesterday's run had RC; today's process (resumed without it) appended its own lines after.
+        Assert.Equal((false, null), RemoteControl.Bridge([Bridge(A), At("2026-11-02T18:00:00.000Z"), At("2026-11-03T09:05:00.000Z")], started));
+        // RC connected by today's process: only its own lines follow.
+        Assert.Equal((true, A), RemoteControl.Bridge([At("2026-11-02T18:00:00.000Z"), Bridge(A), At("2026-11-03T09:05:00.000Z")], started));
+        Assert.Equal((true, A), RemoteControl.Bridge([Bridge(A), At("2026-11-02T18:00:00.000Z")])); // no start time: as before
+    }
+
+    [Fact]
+    public void OnlyARecordPastTheMarkConfirmsAReconnect()
+    {
+        using var t = new TempDir();
+        var file = Path.Combine(t.Path, "s1.jsonl");
+        File.WriteAllText(file, Bridge(A) + "\n" + Done + "\n");
+        var mark = new FileInfo(file).Length;
+        Assert.False(RemoteControl.ConnectedSince(file, mark, A)); // switched back to A: A's old record is no reconnect
+        File.AppendAllText(file, Typed + "\n");
+        Assert.False(RemoteControl.ConnectedSince(file, mark, A));
+        File.AppendAllText(file, Bridge(A, "cse_02") + "\n");
+        Assert.True(RemoteControl.ConnectedSince(file, mark, A));
+        Assert.False(RemoteControl.ConnectedSince(file, mark, B));
+        Assert.False(RemoteControl.ConnectedSince(Path.Combine(t.Path, "missing.jsonl"), 0, A));
     }
 
     [Fact]
@@ -169,6 +197,24 @@ public class InputBoxTests
     }
 
     [Fact]
+    public void AReplyEndingInAQuestionAboveTheBoxIsNoDialog()
+    {
+        string[] rows = ["● Do you want me to commit these changes?", "", Rule(), "> ", Rule(), "  ? for shortcuts"];
+        Assert.Equal(BoxState.Empty, Parse(rows, W).State);
+        Assert.Equal(BoxState.Unrecognised, Parse(Screen(Rule(), "> ", Rule(), " Do you want to proceed?"), W).State); // under it: a dialog
+    }
+
+    [Fact]
+    public void ABoxAboveTheCursorIsTheLiveFrameAndOneBelowItIsNot()
+    {
+        var rows = Screen(Rule(), "> ", Rule(), "  ? for shortcuts"); // the box's top rule is row 2
+        Assert.Equal(BoxState.Empty, Parse(rows, W, cursorRow: 3).State); // in the box
+        Assert.Equal(BoxState.Empty, Parse(rows, W, cursorRow: rows.Length - 1).State); // under it
+        Assert.Equal(BoxState.Unrecognised, Parse(rows, W, cursorRow: 0).State); // above it: an old frame
+        Assert.Equal(BoxState.Unrecognised, Parse(rows, W, cursorRow: rows.Length).State); // off-screen: scrolled away from the live one
+    }
+
+    [Fact]
     public void AnUnrecognisedLayoutIsNotEmpty()
     {
         Assert.Equal(BoxState.Unrecognised, Parse(["PS C:\\> ", ""], W).State); // a shell, not Claude Code
@@ -216,7 +262,7 @@ public class InputBoxTests
 public class RcReconnectTests
 {
     static readonly DateTime T0 = new(2026, 11, 3, 12, 0, 0, DateTimeKind.Utc);
-    static RcReconnect.Entry E(int sw = 1) => new("s1", 42, @"C:\cfg\projects\w\s1.jsonl", @"C:\work\shop", "new-uuid", sw);
+    static RcReconnect.Entry E(int sw = 1, long mark = 0) => new("s1", 42, @"C:\cfg\projects\w\s1.jsonl", @"C:\work\shop", "new-uuid", sw, mark);
 
     [Fact]
     public void ConfirmedAfterTheFirstTry()
@@ -317,6 +363,25 @@ public class RcReconnectTests
     }
 
     [Fact]
+    public void AnOwedOrGivenUpWindowIsOwedAgainAtTheNextSwitchWithItsMark()
+    {
+        var q = new RcReconnect();
+        var e = E(1, mark: 100);
+        q.Queue(e, T0);
+        Assert.Equal(100, q.Owed()["s1"]);
+        Assert.Equal(RcReconnect.Step.GiveUp, q.Next(e, T0 + RcReconnect.Patience, true, false));
+        Assert.Empty(q.Entries);
+        Assert.Equal(100, q.Owed()["s1"]); // still without RC: a switch back owes it, past the same mark
+        q.Queue(E(2, mark: 100), T0.AddHours(1));
+        Assert.Equal(RcReconnect.Step.Done, q.Next(q.Entries.Single(), T0.AddHours(1), true, confirmed: true));
+        Assert.Empty(q.Owed());
+        var left = E(3);
+        q.Queue(left, T0);
+        q.Report(left, "left mismatch", T0.AddSeconds(20));
+        Assert.Empty(q.Owed()); // something sits in that box: never typed into again
+    }
+
+    [Fact]
     public void TheToastsButtonIsOnlyConfirmed()
     {
         var q = new RcReconnect();
@@ -355,7 +420,7 @@ public class ConsoleNudgeIntegrationTests
         $"{Path.DirectorySeparatorChar}Shiftbar.Tests{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
         $"{Path.DirectorySeparatorChar}Shiftbar{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"), "shiftbar.exe");
 
-    static async Task<(string Result, string? Received)> Run(string pre)
+    static async Task<(string Result, string? Received, string? Probe)> Run(string pre)
     {
         using var t = new TempDir();
         var script = Path.Combine(t.Path, "fake.ps1");
@@ -386,7 +451,15 @@ public class ConsoleNudgeIntegrationTests
             // --manual: the person at this machine may be typing elsewhere; the hidden console's input is the child's alone.
             var result = await ConsoleNudge.RunAsync(Helper, child.Id, "s1", manual: true, new Dictionary<string, string> { ["USERPROFILE"] = home });
             for (var i = 0; i < 50 && result.StartsWith("sent") && !File.Exists(outFile); i++) await Task.Delay(100);
-            return (result, File.Exists(outFile) ? File.ReadAllText(outFile) : null);
+            // The box as it reads now: characters typed without Enter are echoed into it by the child's pending read.
+            string? probe = null;
+            if (!result.StartsWith("sent"))
+            {
+                using var p = Process.Start(new ProcessStartInfo(Helper) { ArgumentList = { "rc-nudge", "--probe", child.Id.ToString() }, UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+                probe = await p.StandardOutput.ReadToEndAsync();
+                await p.WaitForExitAsync();
+            }
+            return (result, File.Exists(outFile) ? File.ReadAllText(outFile) : null, probe);
         }
         finally
         {
@@ -398,7 +471,7 @@ public class ConsoleNudgeIntegrationTests
     [Fact]
     public async Task TypesExactlyRemoteControlIntoAnEmptyBox()
     {
-        var (result, received) = await Run("");
+        var (result, received, _) = await Run("");
         Assert.Equal("sent", result);
         Assert.Equal(Command, received);
     }
@@ -406,8 +479,9 @@ public class ConsoleNudgeIntegrationTests
     [Fact]
     public async Task TypesNothingWhenTheBoxHasText()
     {
-        var (result, received) = await Run("half typed");
+        var (result, received, probe) = await Run("half typed");
         Assert.Equal("refused not-empty", result);
         Assert.Null(received);
+        Assert.Contains("9 chars after marker", probe); // "half typed" alone: nothing was typed after it
     }
 }

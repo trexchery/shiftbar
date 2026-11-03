@@ -7,6 +7,7 @@ through the existing claude-swap engine, never through this UI.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -65,17 +66,21 @@ def child_environment() -> dict[str, str]:
     # Finder/launchd omits Homebrew and the official Claude CLI install path.
     dirs = [str(Path.home() / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
     env["PATH"] = os.pathsep.join(dict.fromkeys([*dirs, *env.get("PATH", "").split(os.pathsep)]))
+    # An override under any prefix keeps its own *_ARGS: the bundled defaults go in only as a pair, never beside it.
     if getattr(sys, "frozen", False):
-        env.setdefault("SHIFTBAR_PYTHON", sys.executable)
-        env.setdefault("SHIFTBAR_PYTHON_ARGS", json.dumps(["--python-dispatch"]))
-        engine = Path(sys.executable).parent / "cswap"
-        if not engine.is_file():
-            engine = resources() / "engine" / "cswap"
-        if engine.is_file():
-            env.setdefault("SHIFTBAR_ENGINE", str(engine))
-        else:
-            env.setdefault("SHIFTBAR_ENGINE", sys.executable)
-            env.setdefault("SHIFTBAR_ENGINE_ARGS", json.dumps(["--engine"]))
+        if not env_value("PYTHON"):
+            env["SHIFTBAR_PYTHON"] = sys.executable
+            env["SHIFTBAR_PYTHON_ARGS"] = json.dumps(["--python-dispatch"])
+        if not env_value("ENGINE"):
+            engine = Path(sys.executable).parent / "cswap"
+            if not engine.is_file():
+                engine = resources() / "engine" / "cswap"
+            if engine.is_file():
+                env["SHIFTBAR_ENGINE"] = str(engine)
+                env["SHIFTBAR_ENGINE_ARGS"] = "[]"
+            else:
+                env["SHIFTBAR_ENGINE"] = sys.executable
+                env["SHIFTBAR_ENGINE_ARGS"] = json.dumps(["--engine"])
     return env
 
 
@@ -520,6 +525,10 @@ def migrate_from_patch_goblins(home: Path | None = None, running=_old_app_runnin
     if running(old):
         raise ClaudeSwitchError("The old Patch Goblins app is still running. Quit it (menu bar, Quit), "
                                 "then open Shiftbar again: it carries over your settings.")
+    # Patch Goblins' throwaway Terminal launch scripts lived beside its data folder, not in it.
+    shutil.rmtree(support / "Patch Goblins" / "terminal", ignore_errors=True)
+    with contextlib.suppress(OSError):
+        (support / "Patch Goblins").rmdir()
     if old.is_dir() and not new.exists():
         old.rename(new)
     elif old.is_dir():
@@ -588,7 +597,16 @@ def main(argv=None):
                 print("Native menu bar, backend bridge and bundled credential engine: passed")
     except (ClaudeSwitchError, OSError) as exc:
         print(f"Shiftbar: {exc}", file=sys.stderr)
+        if sys.platform == "darwin" and not options.native_smoke and not options.add_account and not options.accounts:
+            _alert(str(exc))  # a menu bar app opened from Finder has no terminal: say it where the user looks
         raise SystemExit(1) from None
+
+
+def _alert(message: str) -> None:
+    # The message goes in as an argument, never into the script's text.
+    script = ["-e", "on run argv", "-e", 'display alert "Shiftbar" message (item 1 of argv)', "-e", "end run"]
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(["/usr/bin/osascript", *script, message], check=False, timeout=600)
 
 
 if __name__ == "__main__":

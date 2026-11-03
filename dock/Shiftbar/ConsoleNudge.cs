@@ -15,7 +15,8 @@ namespace Shiftbar;
 ///    `/remote-control` and the gates still hold. Otherwise our characters are taken out again with backspaces when the box holds
 ///    exactly them, and left alone when it holds anything else. No Ctrl, Esc or other key is ever sent.
 /// Results: `sent`, `refused <why>` (nothing typed), `aborted <why>` (typed, then removed), `left <why>` (typed, box not as
-/// expected, nothing more done), `error <why>`. `rc-nudge --probe <pid>` reads the box only and prints its shape, never its text.
+/// expected, nothing more done), `error <why>`. `rc-nudge --probe <pid>` reads the box only and prints its shape, never its text
+/// (shiftbar.exe is a GUI program: a shell shows its line only when piped, e.g. `shiftbar.exe rc-nudge --probe 1234 | Out-String`).
 public static class ConsoleNudge
 {
     public const string Command = "/remote-control";
@@ -28,12 +29,16 @@ public static class ConsoleNudge
     /// non-blank characters; `Why` describes the box's shape without any of its text.
     public sealed record Box(BoxState State, string Why, string Text = "", int Chars = 0);
 
-    static readonly Regex Busy = new(@"esc to interrupt|esc to cancel|do you want|❯\s*\d+\.", RegexOptions.IgnoreCase);
+    /// Under the box: a running turn's hint, a dialog or a menu. Above it only the spinner's hint counts: those rows are
+    /// usually the end of the last reply, whose words prove nothing.
+    static readonly Regex Busy = new(@"esc to interrupt|esc to cancel|do you want|❯\s*\d+\.", RegexOptions.IgnoreCase),
+        Running = new(@"esc to interrupt|esc to cancel", RegexOptions.IgnoreCase);
 
     /// Finds Claude Code's input box, the bottom-most '─' rule directly above a prompt line, and reads it. `attrs` (each row's
     /// cell attributes) may prove the text after the marker is a dimmed placeholder; without that proof any text is text.
-    /// `typed`: read after our typing, when an autocomplete list may sit under the box.
-    public static Box Parse(IReadOnlyList<string> rows, int width, IReadOnlyList<ushort[]?>? attrs = null, bool typed = false)
+    /// `typed`: read after our typing, when an autocomplete list may sit under the box. `cursorRow` (the console cursor's row
+    /// in `rows`): a box above it on screen is the frame being drawn only when the cursor is at or under its top rule.
+    public static Box Parse(IReadOnlyList<string> rows, int width, IReadOnlyList<ushort[]?>? attrs = null, bool typed = false, int? cursorRow = null)
     {
         var raw = rows.Select(r => r.Replace('\0', ' ')).ToList();
         var r = raw.Select(x => x.TrimEnd()).ToList();
@@ -41,13 +46,15 @@ public static class ConsoleNudge
         var top = -1;
         for (var i = r.Count - 1; i >= 1 && top < 0; i--) if (MarkerAt(r[i]) >= 0 && IsRule(r[i - 1], width)) top = i - 1;
         if (top < 0) return new(BoxState.Unrecognised, $"no rule followed by a prompt line in {r.Count} rows (width {width})");
+        if (cursorRow is { } c && (c < top || c >= r.Count))
+            return new(BoxState.Unrecognised, $"cursor row {c + 1} is not at or under the box at row {top + 1} of {r.Count} (an old frame?)");
         var prompt = top + 1;
         var end = -1;
         for (var j = prompt + 1; j < Math.Min(r.Count, prompt + 1 + MaxInputRows) && end < 0; j++) if (IsRule(r[j], width)) end = j;
         if (end < 0) return new(BoxState.Unrecognised, $"prompt line at row {prompt + 1} of {r.Count} has no closing rule");
         var above = r.Skip(Math.Max(0, top - 3)).Take(Math.Min(3, top));
         var under = r.Skip(end + 1).ToList();
-        if (above.Any(Busy.IsMatch) || !typed && under.Any(Busy.IsMatch)) return new(BoxState.Unrecognised, "a running turn, menu or dialog is showing");
+        if (above.Any(Running.IsMatch) || !typed && under.Any(Busy.IsMatch)) return new(BoxState.Unrecognised, "a running turn, menu or dialog is showing");
         var below = under.Count(x => x.Trim().Length > 0);
         if (!typed && below > MaxBelow) return new(BoxState.Unrecognised, $"{below} rows below the box (a menu?)");
         var marker = MarkerAt(r[prompt]);
@@ -118,7 +125,7 @@ public static class ConsoleNudge
         using var con = Attached.Open(pid, out var why);
         if (con == null) return "probe not-recognised: " + why;
         if (con.Read() is not { } s) return "probe not-recognised: the screen buffer could not be read";
-        var box = Parse(s.Rows, s.Width, s.Attrs);
+        var box = Parse(s.Rows, s.Width, s.Attrs, cursorRow: s.CursorRow);
         var state = box.State switch { BoxState.Empty => "empty", BoxState.Text => "not-empty", _ => "not-recognised" };
         return $"probe {state}: {box.Why}; window {s.Width}x{s.Rows.Count}, cursor row {s.CursorRow + 1}; shape {Shape(s.Rows, s.Width)}";
     }
@@ -130,7 +137,7 @@ public static class ConsoleNudge
         using var con = Attached.Open(pid, out var why);
         if (con == null) return "refused " + why;
         if (con.Read() is not { } s) return "refused unreadable";
-        var box = Parse(s.Rows, s.Width, s.Attrs);
+        var box = Parse(s.Rows, s.Width, s.Attrs, cursorRow: s.CursorRow);
         if (box.State != BoxState.Empty) return "refused " + (box.State == BoxState.Text ? "not-empty" : "unrecognised");
         if (RemoteControl.Ready(dir, pid, sid, manual) is { } late) return "refused " + late; // right before typing
         var written = con.Type(Command);
@@ -140,6 +147,9 @@ public static class ConsoleNudge
             return after?.State == BoxState.Empty && con.Pending() ? "left pending-input"
                 : "left " + (after == null ? "unreadable" : after.Text.StartsWith(Command) ? "mismatch-after-command" : "mismatch");
         if (RemoteControl.Ready(dir, pid, sid, manual) is { } changed) return Remove(con, changed);
+        // Ready reads files for a while: the box is read once more, with nothing slow between this and Enter.
+        if (con.Read() is not { } last) return "left unreadable";
+        if (Parse(last.Rows, last.Width, typed: true).Text != Command) return "left mismatch";
         return con.Key('\r', 0x0D) ? "sent" : Remove(con, "enter-failed");
     }
 

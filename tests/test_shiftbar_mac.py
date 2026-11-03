@@ -72,6 +72,27 @@ def test_frozen_launcher_uses_bundled_engine_and_python_dispatch(monkeypatch, tm
     assert env["SHIFTBAR_PYTHON"] == str(binary)
 
 
+def test_frozen_launcher_keeps_an_old_prefix_override_with_its_own_args(monkeypatch, tmp_path):
+    binary = tmp_path / "Contents" / "MacOS" / "Shiftbar"
+    binary.parent.mkdir(parents=True)
+    (binary.parent / "cswap").touch()
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(binary))
+    for prefix in shiftbar_mac.ENV_PREFIXES:
+        for name in ("ENGINE", "ENGINE_ARGS", "PYTHON", "PYTHON_ARGS"):
+            monkeypatch.delenv(prefix + name, raising=False)
+    monkeypatch.setenv("PATCH_GOBLINS_ENGINE", "/dev/python")
+    monkeypatch.setenv("PATCH_GOBLINS_ENGINE_ARGS", '["-m", "claude_swap"]')
+    env = shiftbar_mac.child_environment()
+    assert "SHIFTBAR_ENGINE" not in env and "SHIFTBAR_ENGINE_ARGS" not in env  # the backend reads the user's pair
+    assert env["SHIFTBAR_PYTHON"] == str(binary)
+
+
+def test_old_module_name_still_starts_shiftbar():
+    from claude_swap import goblins
+    assert goblins.main is shiftbar_mac.main  # a Patch Goblins login item runs `python -m claude_swap.goblins`
+
+
 def test_engine_dispatch_happens_without_loading_native_ui(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["original"])
     with patch("claude_swap.cli.main") as engine:
@@ -246,9 +267,13 @@ def test_migration_moves_patch_goblins_data_and_login_item(monkeypatch, tmp_path
     import plistlib
     _clear_data_env(monkeypatch)
     old = _old_install(tmp_path)
+    scripts = tmp_path / "Library" / "Application Support" / "Patch Goblins" / "terminal"
+    scripts.mkdir(parents=True)
+    (scripts / "session-1.command").write_text("#!/bin/bash")
     shiftbar_mac.migrate_from_patch_goblins(tmp_path, running=lambda _: False)
     new = tmp_path / "Library" / "Application Support" / "shiftbar"
     assert not old.exists()
+    assert not scripts.parent.exists()  # the old throwaway Terminal scripts are gone
     assert (new / "settings.json").read_text() == '{"AutoPrime": true}'
     assert (new / "auto-prime" / "ledger.json").is_file()
     agents = tmp_path / "Library" / "LaunchAgents"

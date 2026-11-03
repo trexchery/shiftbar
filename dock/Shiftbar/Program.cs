@@ -20,6 +20,8 @@ static class Program
         if (!first) return; // already running in the tray
 
         if (!MigrateFromOldNames()) return;
+        // The old exe may still be installed (a pinned icon, a Start menu entry): its tray finds its mutex held and quits.
+        using var legacy = isolated.Length == 0 ? new Mutex(true, @"Local\PatchGoblins-" + Environment.UserName, out _) : null;
 
         // A bug in a UI handler must never take the tray down silently.
         Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
@@ -55,11 +57,10 @@ static class Program
         foreach (var (name, mutex, title) in OldNames)
         {
             var old = Path.Combine(local, name);
-            if (!Directory.Exists(old) && Microsoft.Win32.Registry.CurrentUser.OpenSubKey(Startup.RunKey)?.GetValue(name) is not string) continue;
-            if (OldTrayRunning(name, mutex))
+            if (!HasData(old) && Microsoft.Win32.Registry.CurrentUser.OpenSubKey(Startup.RunKey)?.GetValue(name) is not string) continue;
+            if (OldTrayRunning(name, mutex, title) is { } running)
             {
-                MessageBox.Show($"The old {title} tray is still running. Quit it (tray icon, Exit), then start Shiftbar again: it carries over your settings.",
-                    "Shiftbar", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(running + " Then start Shiftbar again: it carries over your settings.", "Shiftbar", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return false;
             }
             MoveData(old, DockSettings.Dir);
@@ -73,29 +74,50 @@ static class Program
         return true;
     }
 
-    /// Its mutex is held, or (Patch Goblins) a patch-goblins.exe of this session still runs, say one that is closing.
-    static bool OldTrayRunning(string name, string mutex)
+    /// What still runs of the old install, said for the user, or null: its tray holds its mutex; (Patch Goblins) another
+    /// patch-goblins.exe of this session is an old agents terminal's `agents-mcp`, or a tray that is closing.
+    static string? OldTrayRunning(string name, string mutex, string title)
     {
-        if (Mutex.TryOpenExisting($@"Local\{mutex}-" + Environment.UserName, out var held)) { held.Dispose(); return true; }
-        if (name != "patch-goblins") return false; // the older names are generic words: their mutex alone decides
+        if (Mutex.TryOpenExisting($@"Local\{mutex}-" + Environment.UserName, out var held))
+        {
+            held.Dispose();
+            return $"The old {title} tray is still running. Quit it (tray icon, Exit).";
+        }
+        if (name != "patch-goblins") return null; // the older names are generic words: their mutex alone decides
         var session = System.Diagnostics.Process.GetCurrentProcess().SessionId;
         var running = System.Diagnostics.Process.GetProcessesByName(name);
-        try { return running.Any(p => p.SessionId == session); }
+        try
+        {
+            return running.Any(p => p.SessionId == session)
+                ? $"A Claude Code session that an old {title} agents terminal opened still runs {name}.exe (or the old tray is still closing). End that session."
+                : null;
+        }
         finally { foreach (var p in running) p.Dispose(); }
     }
 
-    /// Moves an old data folder to `dest`. A `dest` that already exists (only a log from an earlier start, say, or what
-    /// moved before an entry was locked) keeps its entries; the old ones move in beside them and clashes stay behind.
+    /// What stays in the old folder: Patch Goblins' retired agents and their git worktrees, which git knows by that path.
+    const string LeftBehind = "agents";
+
+    /// Whether an old data folder holds anything still to carry over.
+    internal static bool HasData(string old)
+    {
+        try { return Directory.Exists(old) && Directory.EnumerateFileSystemEntries(old).Any(e => Path.GetFileName(e) != LeftBehind); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; }
+    }
+
+    /// Moves an old data folder's entries into `dest`, one by one: one locked entry (a folder a still-running process works
+    /// in) stays behind and the rest move. Entries `dest` already has (only a log from an earlier start, say) win; the
+    /// clashing old ones stay behind, as does `agents`.
     internal static void MoveData(string old, string dest)
     {
         try
         {
             if (!Directory.Exists(old)) return;
-            if (!Directory.Exists(dest)) { Directory.Move(old, dest); return; }
-            foreach (var entry in Directory.EnumerateFileSystemEntries(old))
+            Directory.CreateDirectory(dest);
+            foreach (var entry in Directory.EnumerateFileSystemEntries(old).ToList())
             {
                 var target = Path.Combine(dest, Path.GetFileName(entry));
-                if (File.Exists(target) || Directory.Exists(target)) continue;
+                if (Path.GetFileName(entry) == LeftBehind || File.Exists(target) || Directory.Exists(target)) continue;
                 try { if (Directory.Exists(entry)) Directory.Move(entry, target); else File.Move(entry, target); }
                 catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Log(e); } // one locked entry stays; the rest move
             }

@@ -27,7 +27,7 @@
 ### Isolated concurrent sessions
 - **A terminal per account.** **Open terminal** starts Claude Code as that account, in the folder you pick, while every other window stays on its own account (`cswap run`). Switching and auto-switch never touch that terminal, and each account keeps its own chat history. Opening one as the account that is already the default login runs plain `claude`, which follows later switches.
 - **Folder pins.** Assign a project folder to an account; with **Use project accounts** on, a terminal opened there uses it.
-- **A Sessions panel** lists the open Claude Code windows with their account, state and age, and opens a terminal in the same folder on the same account.
+- **A Sessions panel (Windows)** lists the open Claude Code windows with their account, state and age, and opens a terminal in the same folder on the same account.
 
 ### Unified usage
 - **5-hour and weekly meters** for every account, with each model's own weekly window where Anthropic reports one, and reset times.
@@ -37,10 +37,12 @@
 
 ### Limit handling
 - **Auto-switch (opt-in).** Moves the default login off an account near its limit. The switch line adapts to how fast the account is burning quota (80 to 98%), or stays at a fixed threshold you choose. A usage-limit error in any window triggers it within seconds.
-- **Continue on &lt;best&gt;.** When a session stops at a limit, a toast and the Sessions panel offer to reopen it in the same folder on the account with the most room, conversation resumed. The stopped window stays open until you close it.
+- **Continue on &lt;best&gt; (Windows).** When a session stops at a limit, a toast and the Sessions panel offer to reopen it in the same folder on the account with the most room, conversation resumed. The stopped window stays open until you close it.
 - **Remote Control reconnect (Windows).** A switch drops Remote Control in running windows. Shiftbar types `/remote-control` into idle windows that had it, only when the prompt is empty and you have been away from the keyboard.
 - **Quota alerts (opt-in).** Notifications near a limit (80%), at it and when it resets.
 - **Auto-Prime (opt-in).** Starts an account's fresh 5-hour window early with one tiny request, so it also resets early.
+
+On macOS the menu bar has switching, usage, auto-switch, quota alerts, Auto-Prime and per-account terminals; the Sessions panel, Continue on and Remote Control reconnect are Windows only for now ([docs/macos.md](docs/macos.md)).
 
 <p align="center">
   <img src="assets/readme/flyout.png" width="300" alt="The flyout with two synthetic accounts, a weekly pace line on each, and a Sessions list in which the top session stopped at its limit and offers Continue on personal.">
@@ -61,9 +63,9 @@
 | Reopen a stopped session on another account | ✅ Windows | ? | ? | – | – |
 | Reconnect Remote Control after a switch | ✅ Windows | ? | ? | – | – |
 | Where usage comes from | Claude's OAuth usage endpoint | same (it is the engine) | claude.ai endpoint (session cookie) and CLI OAuth | OAuth, cookies, CLI fallback | local logs |
-| Native Windows tray | ✅ | – | – | – | ✅ |
+| Windows tray app | ✅ | – | – | – | ✅ |
 
-<sub>Compiled 2026-11-03 from each project's README and release notes, which change. **?** means the project's own docs don't say. Shiftbar is built on claude-swap's engine, so everything `cswap` does stays available.</sub>
+<sub>Compiled 2026-11-03 from each project's README and release notes, which change. **?** means the project's own docs don't say. The table covers the best-known projects; smaller Windows tray switchers exist too. Shiftbar is built on claude-swap's engine, so everything `cswap` does stays available.</sub>
 
 ## Quick start
 
@@ -92,7 +94,7 @@ Shiftbar only moves your own logins around on your own machine. It does not shar
 ## Good to know
 
 - **One `/stats` for all accounts.** Usage on your other accounts (terminals, Auto-Prime, reopened windows) is added to the "All time" view of your normal `claude` once each UTC day ends. Only `~/.claude/stats-cache.json` is written; the 7-day and 30-day tabs still show your default login only. Preview with `cswap stats-sync --dry-run`.
-- **Terminals Shiftbar opens** carry `--remote-control` when the last session in that folder used it (the **Preserve Remote Control** setting, on by default).
+- **Terminals Shiftbar opens** carry `--remote-control` when the last session in that folder used it (on by default: the `PreserveRemoteControl` key in Shiftbar's `settings.json` on Windows, **Restore Remote Control** in the macOS menu).
 - **The engine is `cswap`.** `engine\cswap.exe` ships in the zip; its documentation is [docs/claude-swap.md](docs/claude-swap.md).
 
 ## Upgrading from Patch Goblins
@@ -102,6 +104,8 @@ Shiftbar is Patch Goblins 0.6 pivoted into a pure account manager. The autonomou
 1. Quit the old tray (Shiftbar refuses to start while it runs, and says so).
 2. Run `shiftbar.exe` once. Your settings carry over, your accounts and logins are untouched, and launch at login stays on if it was. Retired agent settings are ignored.
 3. Delete the old install folder when you like. Installs of handoff, Autodock and ClautoSwap upgrade the same way.
+
+Patch Goblins' retired `agents` folder, with its git worktrees, stays in `%LOCALAPPDATA%\patch-goblins`, where git knows them; remove those worktrees with `git worktree remove` once you no longer need them. The old `patch-goblins.exe` no longer starts a tray while Shiftbar runs.
 
 `PATCH_GOBLINS_*` environment variables are still read; the new names are `SHIFTBAR_*`.
 

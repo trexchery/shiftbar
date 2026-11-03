@@ -460,7 +460,7 @@ public static class ResumeStopped
         var records = Path.Combine(dir, "sessions");
         var found = Directory.Exists(records) ? Directory.EnumerateFiles(records, "*.json").Select(LivePid).OfType<(int Pid, bool Headless)>().ToList() : [];
         var live = found.Select(r => r.Pid).ToHashSet(); // a headless run's key is its own too, never a window's
-        var count = found.Count(r => !r.Headless); // a `claude -p` run (an agent's) is a run, counted by its wrapper's marker
+        var count = found.Count(r => !r.Headless); // a headless `claude -p` run is counted by its wrapper's marker
         if (Directory.Exists(records))
             count += Directory.EnumerateFiles(records, "*.key").Count(f => int.TryParse(Path.GetFileName(f).Split('.')[0], out var pid) && live.Add(pid)
                 && IsRunning(pid) && !(StartOf(pid)?.ToUniversalTime() > File.GetLastWriteTimeUtc(f).AddSeconds(2)));

@@ -26,7 +26,7 @@ Builds are ad hoc signed, not notarized (that needs a Developer ID and Apple cre
 
 ## Upgrading from Patch Goblins
 
-Quit the old app first (its menu bar, **Quit**); Shiftbar refuses to start while it runs. Opening Shiftbar once then moves `~/Library/Application Support/patch-goblins` to `shiftbar` and, if launch at login was on, replaces the old login item with `com.shiftbar.app`. Accounts and logins live in the engine's own store and Keychain entries, which never moved.
+Quit the old app first (its menu bar, **Quit**); Shiftbar refuses to start while it runs, and says so in an alert. Opening Shiftbar once then moves `~/Library/Application Support/patch-goblins` to `shiftbar` and, if launch at login was on, replaces the old login item with `com.shiftbar.app`. Accounts and logins live in the engine's own store and Keychain entries, which never moved.
 
 ## Use
 

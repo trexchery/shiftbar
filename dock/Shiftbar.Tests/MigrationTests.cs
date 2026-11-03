@@ -46,6 +46,22 @@ public class MigrationTests
     }
 
     [Fact]
+    public void RetiredAgentsStayBehindAndAloneAreNothingToMigrate()
+    {
+        using var t = new TempDir();
+        var old = Path.Combine(t.Path, "patch-goblins");
+        Directory.CreateDirectory(Path.Combine(old, "agents", "worktrees"));
+        File.WriteAllText(Path.Combine(old, "settings.json"), "{}");
+        var dest = Path.Combine(t.Path, "shiftbar");
+        Assert.True(Program.HasData(old));
+        Program.MoveData(old, dest);
+        Assert.True(File.Exists(Path.Combine(dest, "settings.json")));
+        Assert.False(Directory.Exists(Path.Combine(dest, "agents"))); // git knows those worktrees by their old path
+        Assert.True(Directory.Exists(Path.Combine(old, "agents", "worktrees")));
+        Assert.False(Program.HasData(old)); // the next start has nothing to carry over
+    }
+
+    [Fact]
     public void RunValueIsSwappedOnlyWhenTheOldOneWasSet()
     {
         var path = @"Software\Shiftbar.Tests\" + Guid.NewGuid().ToString("N");
@@ -85,5 +101,33 @@ public class MigrationTests
         {
             foreach (var p in DockSettings.EnvPrefixes) Environment.SetEnvironmentVariable(p + name, null);
         }
+    }
+}
+
+[Collection("process environment")] // sets SHIFTBAR_DATA
+public class LockedMigrationTests
+{
+    [Fact]
+    public void ALockedEntryStaysAndTheRestMoveEvenWithoutAShiftbarFolder()
+    {
+        using var t = new TempDir();
+        var was = Environment.GetEnvironmentVariable("SHIFTBAR_DATA");
+        Environment.SetEnvironmentVariable("SHIFTBAR_DATA", Path.Combine(t.Path, "log")); // the locked entry is logged: never into the real log
+        try
+        {
+            var old = Path.Combine(t.Path, "patch-goblins");
+            Directory.CreateDirectory(old);
+            File.WriteAllText(Path.Combine(old, "settings.json"), "{\"AutoPrime\":true}");
+            var locked = Path.Combine(old, "prime.json");
+            var dest = Path.Combine(t.Path, "shiftbar");
+            using (new FileStream(locked, FileMode.Create, FileAccess.ReadWrite, FileShare.None))
+                Program.MoveData(old, dest);
+            Assert.Equal("{\"AutoPrime\":true}", File.ReadAllText(Path.Combine(dest, "settings.json"))); // not started on defaults
+            Assert.True(File.Exists(locked));
+            Program.MoveData(old, dest); // the next start takes the rest
+            Assert.True(File.Exists(Path.Combine(dest, "prime.json")));
+            Assert.False(Directory.Exists(old));
+        }
+        finally { Environment.SetEnvironmentVariable("SHIFTBAR_DATA", was); }
     }
 }

@@ -17,36 +17,58 @@ public static class RemoteControl
     public static readonly TimeSpan Quiet = TimeSpan.FromSeconds(10), Away = TimeSpan.FromSeconds(30);
     const int ScanBytes = 2 * 1024 * 1024;
 
-    /// Whether the lines hold a `bridge-session` record, and the newest one's owner.
-    public static (bool Used, string? Owner) Bridge(IEnumerable<string> lines)
+    /// Whether the lines hold a `bridge-session` record, and the newest one's owner. `since` (the window's process start): a
+    /// newest record followed by a line stamped well before it was written by an earlier run of a resumed session, so it
+    /// does not count.
+    public static (bool Used, string? Owner) Bridge(IEnumerable<string> lines, DateTime? since = null)
     {
-        var (used, owner) = (false, (string?)null);
+        var (used, owner, stale) = (false, (string?)null, false);
         foreach (var line in lines)
         {
-            if (!line.Contains("bridge-session", StringComparison.Ordinal)) continue;
+            var bridge = line.Contains("bridge-session", StringComparison.Ordinal);
+            if (!bridge && (since == null || !used || stale || !line.Contains("\"timestamp\"", StringComparison.Ordinal))) continue;
             try
             {
                 using var doc = JsonDocument.Parse(line);
-                if (doc.RootElement.ValueKind != JsonValueKind.Object || Str(doc.RootElement, "type") != "bridge-session") continue;
-                (used, owner) = (true, Str(doc.RootElement, "ownerAccountUuid"));
+                if (doc.RootElement.ValueKind != JsonValueKind.Object) continue;
+                if (Str(doc.RootElement, "type") == "bridge-session") (used, owner, stale) = (true, Str(doc.RootElement, "ownerAccountUuid"), false);
+                else if (since != null && Str(doc.RootElement, "timestamp") is { } ts
+                    && DateTime.TryParse(ts, null, System.Globalization.DateTimeStyles.RoundtripKind, out var at)
+                    && at.ToUniversalTime() < since.Value.AddMinutes(-1)) stale = true;
             }
             catch (JsonException) { } // a line cut by the tail window, or one being written
         }
-        return (used, owner);
+        return stale ? (false, null) : (used, owner);
     }
 
     /// `Bridge` of a transcript's last 2 MB; nothing when it cannot be read.
-    public static (bool Used, string? Owner) BridgeOf(string transcript)
+    public static (bool Used, string? Owner) BridgeOf(string transcript, DateTime? since = null)
     {
-        try { return Bridge(ResumeStopped.Tail(transcript, ScanBytes)); }
+        try { return Bridge(ResumeStopped.Tail(transcript, ScanBytes), since); }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return (false, null); }
     }
 
-    /// Whether a switch from `was` to `now` (account uuids) dropped this window's RC: it had RC, its newest connection is not
-    /// the new login's, and it was the previous login's (when that is known and differs: an RC left over from an older login
-    /// is not this switch's to restore).
+    /// Whether the newest `bridge-session` record written past byte `mark` (the transcript's length when the reconnect was
+    /// queued) is owned by `uuid`: an older record of that login is no proof of a reconnect.
+    public static bool ConnectedSince(string transcript, long mark, string uuid)
+    {
+        try
+        {
+            using var f = new FileStream(transcript, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var start = Math.Max(mark, f.Length - ScanBytes);
+            if (start >= f.Length) return false;
+            f.Seek(start, SeekOrigin.Begin);
+            var buf = new byte[f.Length - start];
+            f.ReadExactly(buf);
+            return Bridge(Encoding.UTF8.GetString(buf).Split('\n')).Owner == uuid;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    /// Whether a switch from `was` to `now` (account uuids) dropped this window's RC: its newest connection was the previous
+    /// login's. An RC left over from an older login is not this switch's to restore, and an unknown previous login is no proof.
     public static bool Dropped((bool Used, string? Owner) bridge, string? was, string now) =>
-        bridge is { Used: true, Owner: { } owner } && owner != now && (was == null || was == now || owner == was);
+        bridge is { Used: true, Owner: { } owner } && owner == was && owner != now;
 
     /// The default login's account uuid (`oauthAccount.accountUuid` of the default profile's global config, the file the
     /// engine's `get_default_global_config_path` names). Only that one field is read; null when unreadable.
@@ -135,8 +157,10 @@ public sealed class RcReconnect
 
     public enum Step { Wait, Nudge, Done, GiveUp, Drop }
 
-    public sealed class Entry(string sessionId, int pid, string transcript, string cwd, string newUuid, int switchId)
+    /// `mark`: the transcript's length when first queued; only a record past it confirms.
+    public sealed class Entry(string sessionId, int pid, string transcript, string cwd, string newUuid, int switchId, long mark = 0)
     {
+        public long Mark { get; } = mark;
         public string SessionId { get; } = sessionId;
         public int Pid { get; } = pid;
         public string Transcript { get; } = transcript;
@@ -153,8 +177,16 @@ public sealed class RcReconnect
 
     readonly Dictionary<string, Entry> _live = [];
     readonly HashSet<string> _queued = []; // "session#switch": never queued twice for one switch
+    readonly Dictionary<string, long> _lapsed = []; // given up on, so still without RC: owed again at the next switch
 
     public IReadOnlyCollection<Entry> Entries => _live.Values;
+    /// The windows a new switch owes a reconnect whatever their newest record says (still owed, or given up on), with their marks.
+    public Dictionary<string, long> Owed()
+    {
+        var owed = new Dictionary<string, long>(_lapsed);
+        foreach (var e in _live.Values) owed[e.SessionId] = e.Mark;
+        return owed;
+    }
     /// Whether `e` is still the reconnect owed to its window (a later switch replaces it).
     public bool Owes(Entry e) => _live.TryGetValue(e.SessionId, out var cur) && cur == e;
 
@@ -167,6 +199,7 @@ public sealed class RcReconnect
         e.NotBefore = now + FirstWait;
         e.GiveUpAt = now + Patience;
         _live[e.SessionId] = e;
+        _lapsed.Remove(e.SessionId);
         return true;
     }
 
@@ -187,6 +220,7 @@ public sealed class RcReconnect
             : e.Tries >= MaxTries || now >= e.GiveUpAt ? Step.GiveUp
             : now >= e.NotBefore ? Step.Nudge : Step.Wait;
         if (step is Step.Done or Step.GiveUp or Step.Drop) Forget(e);
+        if (step == Step.GiveUp) _lapsed[e.SessionId] = e.Mark;
         return step;
     }
 
@@ -215,7 +249,7 @@ public sealed class RcReconnect
                 e.NotBefore = now + Backoff;
                 return Step.Wait;
             case "left":
-                Forget(e);
+                Forget(e); // not lapsed: something sits in that box, nothing is typed there again
                 return Step.GiveUp;
             default:
                 e.NotBefore = now + Backoff;
@@ -240,6 +274,7 @@ public sealed partial class TrayApp
     {
         if (active == null || !OperatingSystem.IsWindows() || active == _rcActive && _rcUuid != null) return;
         var uuid = RemoteControl.LoginUuid(); // read with the account number it goes with, at each change
+        if (uuid == null && _rcActive != null && _rcActive != active) return; // unreadable now (being rewritten): the change is seen again next time
         if (_rcActive is { } was && was != active && uuid != null && _settings.ReconnectRemoteControl)
             _ = RcQueueAsync(_rcUuid, uuid, ++_rcSwitch);
         (_rcActive, _rcUuid) = (active, uuid);
@@ -249,11 +284,23 @@ public sealed partial class TrayApp
     {
         try
         {
-            var owed = _rc.Entries.Select(e => e.SessionId).ToHashSet(); // still owed from an earlier switch: owed on this one's login now
-            var found = await Task.Run(() => ResumeStopped.LiveSessions([(ResumeStopped.DefaultDir, null)])
-                .Select(s => (s, t: ResumeStopped.TranscriptOf(s.ConfigDir, s.SessionId, s.Cwd)))
-                .Where(x => x.t != null && (owed.Contains(x.s.SessionId) || RemoteControl.Dropped(RemoteControl.BridgeOf(x.t), was, now)))
-                .Select(x => new RcReconnect.Entry(x.s.SessionId, x.s.Pid, x.t!, x.s.Cwd, now, switchId)).ToList());
+            var owed = _rc.Owed(); // still owed from an earlier switch: owed on this one's login now, past the same mark
+            var found = await Task.Run(() =>
+            {
+                var list = new List<RcReconnect.Entry>();
+                foreach (var s in ResumeStopped.LiveSessions([(ResumeStopped.DefaultDir, null)]))
+                {
+                    if (ResumeStopped.TranscriptOf(s.ConfigDir, s.SessionId, s.Cwd) is not { } t) continue;
+                    if (!owed.TryGetValue(s.SessionId, out var mark))
+                    {
+                        try { mark = new FileInfo(t).Length; } // taken before the read: a record appended meanwhile is past it
+                        catch (IOException) { continue; }
+                        if (!RemoteControl.Dropped(RemoteControl.BridgeOf(t, s.StartedUtc), was, now)) continue;
+                    }
+                    list.Add(new(s.SessionId, s.Pid, t, s.Cwd, now, switchId, mark));
+                }
+                return list;
+            });
             var queued = found.Count(e => _rc.Queue(e, DateTime.UtcNow));
             if (queued > 0) Program.Log($"remote control: {queued} window(s) to reconnect after switch {switchId}");
         }
@@ -271,7 +318,7 @@ public sealed partial class TrayApp
             {
                 if (!_rc.Owes(e)) continue; // replaced by a later switch while an earlier one was being typed
                 var (alive, confirmed) = await Task.Run(() => (ResumeStopped.LiveSessions([(ResumeStopped.DefaultDir, null)]).Any(s => s.Pid == e.Pid && s.SessionId == e.SessionId),
-                    RemoteControl.BridgeOf(e.Transcript).Owner == e.NewUuid));
+                    RemoteControl.ConnectedSince(e.Transcript, e.Mark, e.NewUuid)));
                 switch (_rc.Next(e, DateTime.UtcNow, alive, confirmed))
                 {
                     case RcReconnect.Step.Done:
@@ -307,7 +354,7 @@ public sealed partial class TrayApp
     {
         try
         {
-            if (await Task.Run(() => RemoteControl.BridgeOf(e.Transcript).Owner == e.NewUuid)) { Notify("", $"{e.Folder}: Remote Control is connected.", ToolTipIcon.None); return; }
+            if (await Task.Run(() => RemoteControl.ConnectedSince(e.Transcript, e.Mark, e.NewUuid))) { Notify("", $"{e.Folder}: Remote Control is connected.", ToolTipIcon.None); return; }
             var result = await ConsoleNudge.RunAsync(Environment.ProcessPath!, e.Pid, e.SessionId, manual: true);
             Program.Log($"remote control: {e.SessionId} {result} (asked)");
             if (result.StartsWith("sent ") || result == "sent") { _rc.Track(e, DateTime.UtcNow); return; }
