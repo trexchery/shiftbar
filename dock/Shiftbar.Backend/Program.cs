@@ -1,0 +1,73 @@
+using System.Collections.Concurrent;
+using System.Text;
+
+namespace Shiftbar;
+
+/// The desktop host supplies the same single-thread context as the Windows tray.
+internal static class Program
+{
+    static int Main(string[] args)
+    {
+        Console.OutputEncoding = new UTF8Encoding(false);
+        if (args is ["--help"] or ["-h"])
+        {
+            Console.WriteLine("Shiftbar backend: --serve | --version");
+            return 0;
+        }
+        if (args is ["--version"]) { Console.WriteLine("Shiftbar 0.7.0"); return 0; }
+        if (args is not ["--serve"])
+        {
+            Console.Error.WriteLine("Usage: shiftbar-backend --serve | --version");
+            return 2;
+        }
+        try
+        {
+            // FileShare.None locks the same private state directory for all launch paths.
+            StoreSecurity.Harden(DockSettings.Dir);
+            using var lease = new FileStream(Path.Combine(DockSettings.Dir, "backend.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            using var context = new HostContext();
+            SynchronizationContext.SetSynchronizationContext(context);
+            var task = new BackendHost().RunAsync();
+            task.ContinueWith(_ => context.Complete(), TaskScheduler.Default);
+            context.Run();
+            task.GetAwaiter().GetResult();
+            return 0;
+        }
+        catch (Exception e)
+        {
+            Log(e);
+            Console.Error.WriteLine(Engine.Redact(e.Message));
+            return 1;
+        }
+    }
+
+    internal static void Log(Exception? error) => Log(error?.ToString() ?? "unknown error");
+    internal static void Log(string message)
+    {
+        try
+        {
+            Directory.CreateDirectory(DockSettings.Dir);
+            var path = Path.Combine(DockSettings.Dir, "shiftbar.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 1_000_000) File.Delete(path);
+            File.AppendAllText(path, $"{DateTimeOffset.Now:O} {Engine.Redact(message)}\n");
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+}
+
+internal sealed class HostContext : SynchronizationContext, IDisposable
+{
+    readonly BlockingCollection<(SendOrPostCallback, object?)> queue = new();
+    public override void Post(SendOrPostCallback callback, object? state)
+    {
+        try { queue.Add((callback, state)); }
+        catch (InvalidOperationException) { }
+    }
+    public void Run()
+    {
+        foreach (var (callback, state) in queue.GetConsumingEnumerable()) callback(state);
+    }
+    public void Complete() => queue.CompleteAdding();
+    public void Dispose() => queue.Dispose();
+}

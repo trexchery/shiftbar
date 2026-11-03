@@ -1,0 +1,193 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+
+namespace Shiftbar;
+
+/// Desktop scheduling only: quota, prime and stopped-window decisions remain in
+/// the same classes the Windows tray uses. The host calls this on its context.
+internal sealed partial class BackendUpkeep : IDisposable
+{
+    readonly Engine engine;
+    readonly DockSettings settings;
+    readonly Func<Snapshot?> snapshot;
+    readonly Action<string, string> notify;
+    readonly Func<Task> refresh;
+    readonly SynchronizationContext context;
+    readonly QuotaAlerts alerts = new();
+    readonly SwitchLine switchLine = new();
+    readonly Primer primer = new(Primer.DefaultPath);
+    readonly ConcurrentQueue<LimitHit> hits = new();
+    readonly Dictionary<string, Limit> subagentLimits = [];
+    readonly HashSet<string> reported = [], told = [];
+    readonly Dictionary<string, DateTime> moves;
+    readonly string movesPath = Path.Combine(DockSettings.Dir, "resumed.json");
+    readonly LimitWatch watch;
+    readonly LimitSwitch limits;
+    DateTimeOffset lastConfig, lastPrime, lastAuto;
+    Task? autoTask;
+    CancellationTokenSource? autoCancel;
+    double? threshold;
+    double hysteresis = 10;
+    readonly bool followsLogins;
+    bool ticking, disposed;
+
+    public double EffectiveThreshold => settings.AutoLine && snapshot()?.Accounts.FirstOrDefault(a => a.Active) is { } active
+        ? switchLine.For(active, null) : threshold ?? 97;
+
+    public void SettingsChanged()
+    {
+        if (!settings.AutoSwitch) autoCancel?.Cancel();
+    }
+
+    public BackendUpkeep(Engine engine, DockSettings settings, Func<Snapshot?> snapshot,
+        Action<string, string> notify, Func<Task> refresh, bool? followsLogins = null)
+    {
+        (this.engine, this.settings, this.snapshot, this.notify, this.refresh) = (engine, settings, snapshot, notify, refresh);
+        this.followsLogins = followsLogins ?? !OperatingSystem.IsMacOS(); // as Engine.SwitchNowArgs: macOS switches --exclusive, so a held account is no target
+        context = SynchronizationContext.Current ?? throw new InvalidOperationException("Desktop upkeep needs the host context");
+        moves = ResumeStopped.LoadMoves(movesPath);
+        watch = new(hit =>
+        {
+            try { context.Post(_ => _ = HandleLimitAsync(hit), null); }
+            catch (Exception error) when (error is InvalidOperationException or ObjectDisposedException) { }
+        }, Program.Log);
+        limits = new(snapshot, ResumeStopped.DefaultLogin, LiveOrLaunching,
+            engine.ImportUsageAsync, engine.SwitchNowAsync, reported, Program.Log,
+            threshold: () => EffectiveThreshold, hysteresis: () => hysteresis, followsLogins: this.followsLogins);
+    }
+
+    HashSet<int> LiveOrLaunching()
+    {
+        var live = ResumeStopped.LiveProfiles(ResumeStopped.ConfigDirs(null));
+        live.UnionWith(ResumeStopped.Launching(moves, DateTime.UtcNow));
+        return live;
+    }
+
+    public async Task TickAsync()
+    {
+        if (disposed || ticking || snapshot() is not { } snap) return;
+        ticking = true;
+        try
+        {
+            SettingsChanged();
+            var notices = alerts.Observe(snap.Accounts);
+            switchLine.Observe(snap.Accounts, DateTimeOffset.Now);
+            if (settings.QuotaNotifications && QuotaAlerts.Balloon(notices) is { } balloon)
+                notify(balloon.Title, balloon.Text);
+            var now = DateTimeOffset.Now;
+            if ((settings.AutoSwitch || settings.AutoPrime) && now - lastConfig > TimeSpan.FromMinutes(3))
+                await ReadConfigAsync();
+            if (settings.AutoSwitch && threshold != null && (autoTask == null || autoTask.IsCompleted)
+                && now - lastAuto >= TimeSpan.FromSeconds(30))
+            {
+                lastAuto = now;
+                autoCancel?.Dispose();
+                autoCancel = new CancellationTokenSource();
+                autoTask = AutoAsync(autoCancel.Token); // buffering never blocks the API-error watcher
+            }
+            if (settings.AutoPrime && !priming)
+            {
+                if (primer.Observe(snap.Accounts, now)) primer.Save();
+                if (primer.WantsReread(now)) { await engine.ListAsync(refresh: true); await refresh(); primer.Reread(now); }
+                // Overnight too; the 30-minute guard and the current login's reserve apply.
+                if (threshold != null && now - lastPrime >= TimeSpan.FromMinutes(30)
+                    && !(snap.Accounts.FirstOrDefault(a => a.Active) is { } login && ResumeStopped.Peak(login) >= EffectiveThreshold - hysteresis)
+                    && primer.Ready(snap.Accounts, now) is { Count: > 0 } ready)
+                {
+                    lastPrime = now;
+                    await PrimeCandidatesAsync(ready, () => settings.AutoPrime);
+                }
+            }
+            if (!settings.AutoSwitch || threshold == null || disposed) return;
+            var dirs = ResumeStopped.ConfigDirs(snap.ActiveAccountNumber);
+            watch.Sync(dirs.Select(d => d.Dir));
+            await Task.Run(() => watch.Poll(ResumeStopped.LiveTranscripts(dirs, DateTime.UtcNow)));
+            while (hits.TryDequeue(out var hit)) await HandleLimitAsync(hit);
+            await ResumeAsync(snapshot() ?? snap);
+        }
+        catch (Exception error) { Program.Log(error); }
+        finally { ticking = false; }
+    }
+
+    async Task ReadConfigAsync()
+    {
+        var config = await engine.ConfigAsync();
+        ApplyEngineConfig(config);
+    }
+
+    public void ApplyEngineConfig(IReadOnlyDictionary<string, string?> config)
+    {
+        if (!double.TryParse(config.GetValueOrDefault("autoswitch.threshold"), NumberStyles.Float, CultureInfo.InvariantCulture, out var line)) return;
+        threshold = line;
+        if (double.TryParse(config.GetValueOrDefault("autoswitch.hysteresisPct"), NumberStyles.Float, CultureInfo.InvariantCulture, out var h)) hysteresis = h;
+        ResumeStopped.Models = (config.GetValueOrDefault("autoswitch.model") ?? "")
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        lastConfig = DateTimeOffset.Now;
+    }
+
+    async Task HandleLimitAsync(LimitHit hit)
+    {
+        if (!settings.AutoSwitch || disposed) return;
+        if (snapshot() == null || threshold == null) { hits.Enqueue(hit); return; }
+        try
+        {
+            if (ResumeStopped.SubagentSession(hit.ConfigDir, hit.File) is { } parent) subagentLimits[parent] = hit.Limit;
+            var outcome = await limits.OnLimitAsync(hit); // immediate, never queued behind an auto-switch buffer
+            if (outcome?.Switched is { Switched: true } switched)
+            {
+                notify("Account switched", Format.SwitchNotice(switched.From, switched.To));
+                await refresh();
+            }
+            else if (outcome?.Error is { } error && told.Add(error)) notify("Auto-switch needs attention", error);
+            else if (outcome is { NoRoom: true } && told.Add("no-room:" + outcome.Earliest))
+                notify("All accounts near their limits", outcome.Earliest is { } reset ? "Earliest reset " + Format.When(reset, DateTimeOffset.Now) : "No reset time known.");
+        }
+        catch (Exception error) { Program.Log(error); }
+    }
+
+    internal async Task ResumeAsync(Snapshot snap)
+    {
+        var login = ResumeStopped.DefaultLogin();
+        var stops = await Task.Run(() => ResumeStopped.Scan(ResumeStopped.ConfigDirs(snap.ActiveAccountNumber), DateTime.UtcNow,
+            login.Account == snap.ActiveAccountNumber ? login.ChangedAt : DateTime.MaxValue, includeBusy: true, subagentLimits: subagentLimits));
+        if (ResumeStopped.LimitReport(stops, snap.Accounts, DateTimeOffset.UtcNow, reported) is { } report)
+            await engine.ImportUsageAsync(report);
+        foreach (var stop in stops.DistinctBy(s => s.SessionId))
+        {
+            if (!settings.AutoSwitch || disposed) return;
+            var target = stop.AtLimit ? ResumeStopped.Target(stop, snap.Accounts, n => ResumeStopped.ProfileDir(n) != null,
+                EffectiveThreshold, hysteresis, DateTimeOffset.UtcNow, null, limits.RefusedUntil, LiveOrLaunching(), limits.ScopedRefusedUntil,
+                line: settings.AutoLine ? a => switchLine.For(a, stop.Model) : null, followsLogins: followsLogins) : null;
+            if (target is not { } number || !stop.AtLimit) continue;
+            // Terminal.app can accept an AppleScript request without proving that
+            // a replacement Claude session started. Keep the existing session
+            // alive and let its owner decide when and how to resume.
+            if (told.Add($"manual-move:{stop.SessionId}:{number}"))
+                notify("Terminal needs attention", $"A session in {stop.Cwd} is at its limit and account #{number} has room. The session remains open; continue or restart it yourself when ready.");
+
+        }
+    }
+
+    async Task AutoAsync(CancellationToken cancellation)
+    {
+        try
+        {
+            var (_, events) = await engine.AutoOnceAsync(EffectiveThreshold, cancellation);
+            if (disposed || cancellation.IsCancellationRequested) return;
+            foreach (var ev in events)
+            {
+                if (ev is { Event: "switch", DryRun: false })
+                    notify("Account switched", Format.SwitchNotice(ev.From, ev.To));
+                else if (ev.Event is "account-quarantined" or "all-exhausted" or "config-warning" or "error")
+                {
+                    var text = ev.Message ?? ev.Detail ?? ev.Reason ?? ev.Event;
+                    if (told.Add(ev.Event + ":" + text)) notify("Auto-switch", text);
+                }
+            }
+            await refresh();
+        }
+        catch (Exception error) { if (!cancellation.IsCancellationRequested) Program.Log(error); }
+    }
+
+    public void Dispose() { disposed = true; autoCancel?.Cancel(); watch.Dispose(); }
+}

@@ -1,0 +1,613 @@
+"""Shiftbar's macOS shell; all account policy stays upstream.
+
+The menu bar owns the .NET backend, which hosts auto-switch, quota alerts and
+Auto-Prime with the same code as the Windows tray. Credentials are passed only
+through the existing claude-swap engine, never through this UI.
+"""
+from __future__ import annotations
+
+import argparse
+import contextlib
+import json
+import os
+from pathlib import Path
+import queue
+import shlex
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+from claude_swap.exceptions import ClaudeSwitchError
+
+# Newest first, as the backend reads them (DockSettings.Env): a pre-rename PATCH_GOBLINS_/HANDOFF_ variable still works.
+ENV_PREFIXES = ("SHIFTBAR_", "PATCH_GOBLINS_", "HANDOFF_")
+LOGIN_LABEL = "com.shiftbar.app"
+# Pre-rename login items: the shared backend's label, then the menu bar's own.
+_OLD_LOGIN_LABELS = ("com.patchgoblins.app", "com.patch-goblins.menubar")
+
+
+def env_value(name: str) -> str | None:
+    for prefix in ENV_PREFIXES:
+        if value := os.environ.get(prefix + name):
+            return value
+    return None
+
+
+def resources() -> Path:
+    if os.environ.get("RESOURCEPATH"):
+        return Path(os.environ["RESOURCEPATH"])
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent.parent / "Resources"
+    return Path(__file__).resolve().parents[2]
+
+
+def backend_command() -> list[str]:
+    override = env_value("BACKEND")
+    if override:
+        return [override]
+    root = resources()
+    names = [root / "backend" / "shiftbar-backend",
+             root / "build" / "macos" / "backend" / "shiftbar-backend",
+             root / "dock" / "Shiftbar.Backend" / "bin" / "Release" / "net8.0" / "shiftbar-backend",
+             root / "dock" / "Shiftbar.Backend" / "bin" / "Debug" / "net8.0" / "shiftbar-backend"]
+    for candidate in names:
+        if candidate.is_file():
+            return [str(candidate)]
+    found = shutil.which("shiftbar-backend")
+    if found:
+        return [found]
+    raise ClaudeSwitchError("Shiftbar backend is missing. Install the complete .app or run macos/build-macos.sh.")
+
+
+def child_environment() -> dict[str, str]:
+    env = dict(os.environ)
+    # Finder/launchd omits Homebrew and the official Claude CLI install path.
+    dirs = [str(Path.home() / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
+    env["PATH"] = os.pathsep.join(dict.fromkeys([*dirs, *env.get("PATH", "").split(os.pathsep)]))
+    # An override under any prefix keeps its own *_ARGS: the bundled defaults go in only as a pair, never beside it.
+    if getattr(sys, "frozen", False):
+        if not env_value("PYTHON"):
+            env["SHIFTBAR_PYTHON"] = sys.executable
+            env["SHIFTBAR_PYTHON_ARGS"] = json.dumps(["--python-dispatch"])
+        if not env_value("ENGINE"):
+            engine = Path(sys.executable).parent / "cswap"
+            if not engine.is_file():
+                engine = resources() / "engine" / "cswap"
+            if engine.is_file():
+                env["SHIFTBAR_ENGINE"] = str(engine)
+                env["SHIFTBAR_ENGINE_ARGS"] = "[]"
+            else:
+                env["SHIFTBAR_ENGINE"] = sys.executable
+                env["SHIFTBAR_ENGINE_ARGS"] = json.dumps(["--engine"])
+    return env
+
+
+class BackendClient:
+    """Concurrent JSONL client: events arrive while a call is waiting."""
+    def __init__(self, command=None, *, env=None):
+        self.command = command or [*backend_command(), "--serve"]
+        self.env = env or child_environment()
+        self.events: queue.Queue[dict] = queue.Queue()
+        self._pending: dict[int, queue.Queue] = {}
+        self._lock = threading.Lock()
+        self._serial = 0
+        self.process = None
+        self._closed = False
+
+    def start(self):
+        self.process = subprocess.Popen(self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                        stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
+                                        bufsize=1, env=self.env)
+        threading.Thread(target=self._read, daemon=True, name="shiftbar-backend-reader").start()
+
+    def _read(self):
+        try:
+            for line in self.process.stdout:
+                try:
+                    message = json.loads(line)
+                except (ValueError, TypeError):
+                    continue  # backend diagnostics are never displayed as protocol
+                if not isinstance(message, dict):
+                    continue
+                if "event" in message:
+                    self.events.put(message)
+                else:
+                    with self._lock:
+                        pending = self._pending.get(message.get("id"))
+                    if pending is not None:
+                        pending.put(message)
+        finally:
+            with self._lock:
+                for pending in self._pending.values():
+                    pending.put({"error": {"message": "The Shiftbar backend stopped."}})
+            if not self._closed:
+                self.events.put({"event": "stopped"})
+
+    def request(self, method: str, params=None, *, timeout=90):
+        result_queue: queue.Queue = queue.Queue(maxsize=2)
+        with self._lock:
+            if self.process is None or self.process.poll() is not None:
+                raise ClaudeSwitchError("The backend is not running. Relaunch Shiftbar.")
+            self._serial += 1
+            serial = self._serial
+            self._pending[serial] = result_queue
+            try:
+                self.process.stdin.write(json.dumps({"id": serial, "method": method, "params": params or {}}) + "\n")
+                self.process.stdin.flush()
+            except (OSError, ValueError):
+                self._pending.pop(serial, None)
+                raise ClaudeSwitchError("The backend connection closed.") from None
+        try:
+            response = result_queue.get(timeout=timeout)
+            if "error" in response:
+                detail = response["error"]
+                raise ClaudeSwitchError(detail.get("message", "Backend request failed") if isinstance(detail, dict) else str(detail))
+            return response.get("result")
+        except queue.Empty:
+            raise ClaudeSwitchError(f"Backend request timed out ({method}).") from None
+        finally:
+            with self._lock:
+                self._pending.pop(serial, None)
+
+    def close(self):
+        self._closed = True
+        process = self.process
+        if process is None:
+            return
+        if process.poll() is None:
+            try:
+                self.request("quit", timeout=10)
+            except ClaudeSwitchError:
+                pass
+            try:
+                process.stdin.close()
+                process.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired):
+                process.terminate()
+        for stream in (process.stdin, process.stdout):
+            if stream:
+                stream.close()
+
+
+def run_terminal(argv: list[str], *, cwd: str | None = None) -> Path:
+    """Open an argv-safe private command file in the user's macOS Terminal."""
+    if sys.platform != "darwin":
+        raise ClaudeSwitchError("Opening Terminal is available on macOS only.")
+    root = Path.home() / "Library" / "Application Support" / "shiftbar" / "terminal"
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    import uuid
+    path = root / ("session-" + uuid.uuid4().hex + ".command")
+    # Export only launcher configuration, never credentials. Delete the command
+    # after the shell reads it; the session itself remains a normal terminal.
+    lines = ["#!/bin/bash", "set -e", 'rm -- "$0"']
+    if cwd:
+        lines.append("cd -- " + shlex.quote(str(Path(cwd).expanduser().resolve())))
+    env = child_environment()
+    lines.append("export PATH=" + shlex.quote(env["PATH"]))
+    for name in ("BACKEND", "ENGINE", "ENGINE_ARGS", "PYTHON", "PYTHON_ARGS", "DATA"):
+        value = env.get("SHIFTBAR_" + name) or env_value(name)
+        if value:
+            lines.append("export SHIFTBAR_" + name + "=" + shlex.quote(value))
+    lines.append("exec " + shlex.join(argv))
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o700)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines) + "\n")
+    subprocess.run(["/usr/bin/open", "-a", "Terminal", str(path)], check=True)
+    return path
+
+
+def app_command(*args: str) -> list[str]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable, *args]
+    return [sys.executable, "-m", "claude_swap.shiftbar_mac", *args]
+
+
+def add_account() -> str:
+    """Reuse official isolated login + Keychain capture without swapping a live login."""
+    import tempfile
+    from claude_swap.enroll import enroll
+    from claude_swap.session import AUTH_OVERRIDE_ENV_VARS, delete_macos_keychain_entry
+    from claude_swap.switcher import ClaudeAccountSwitcher
+    env = child_environment()
+    claude = shutil.which("claude", path=env["PATH"])
+    if not claude:
+        raise ClaudeSwitchError("Install Claude Code before adding an account.")
+    with tempfile.TemporaryDirectory(prefix="shiftbar-login-") as temp:
+        profile = Path(temp)
+        for name in AUTH_OVERRIDE_ENV_VARS:
+            env.pop(name, None)
+        env["CLAUDE_CONFIG_DIR"] = temp
+        env["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = temp
+        try:
+            outcome = subprocess.run([claude, "auth", "login"], env=env, check=False)
+            if outcome.returncode != 0:
+                raise ClaudeSwitchError("Claude Code login did not finish. No account was added.")
+            return enroll(ClaudeAccountSwitcher(), temp)
+        finally:
+            if sys.platform == "darwin":
+                delete_macos_keychain_entry(profile)
+
+
+class MenuExtension:
+    hosts_auto_switch = True
+
+    def __init__(self, *, native_smoke=False):
+        self.client = BackendClient()
+        self.snapshot: dict = {}
+        self._refreshing = False
+        self._last_refresh = 0.0
+        self._stopped = False
+        self._restart_at = 0.0
+        self._restart_count = 0
+        self.native_smoke = native_smoke
+        self.smoke_passed = False
+        self._smoke_deadline = time.monotonic() + 20
+
+    def start(self, app):
+        self.switcher = app.switcher
+        self.client.start()
+        self._refresh()
+
+    def _background(self, fn):
+        def invoke():
+            try:
+                fn()
+            except Exception:
+                self.client.events.put({"event": "ui_error", "message": "The action failed. Check the backend status and try again."})
+        threading.Thread(target=invoke, daemon=True).start()
+
+    def _refresh(self):
+        if self._refreshing or self._stopped:
+            return
+        self._refreshing = True
+        def take():
+            try:
+                self.snapshot = self.client.request("status") or {}
+                self._last_refresh = time.monotonic()
+                self.client.events.put({"event": "ui_changed"})
+            finally:
+                self._refreshing = False
+        self._background(take)
+
+    def tick(self, app):
+        import rumps
+        if self.native_smoke and time.monotonic() > self._smoke_deadline:
+            self._finish_smoke(app, False)
+            return
+        while True:
+            try:
+                message = self.client.events.get_nowait()
+            except queue.Empty:
+                break
+            event = message.get("event")
+            if event == "notify":
+                if not self.native_smoke:
+                    rumps.notification("Shiftbar", message.get("title", ""), message.get("body", ""))
+            elif event == "ui_error":
+                if self.native_smoke:
+                    self._finish_smoke(app, False)
+                    return
+                rumps.alert(title="Shiftbar", message=message["message"])
+            elif event == "stopped":
+                self._stopped = True
+                self._restart_at = time.monotonic() + 3
+                rumps.notification("Shiftbar", "Backend stopped", "Auto-switch and quota alerts pause until it restarts.")
+                app.rebuild_menu()
+            elif event in ("changed", "ready"):
+                self._refresh()
+            elif event == "ui_changed":
+                self._restart_count = 0
+                config = self.snapshot.get("config", {})
+                enabled = config.get("autoSwitch") if isinstance(config, dict) else None
+                if isinstance(enabled, bool) and app.settings.auto_switch_enabled != enabled:
+                    app.settings.auto_switch_enabled = enabled
+                    app.settings.save(app.switcher.backup_dir / "menubar_settings.json")
+                app.rebuild_menu()
+                if self.native_smoke and self.snapshot.get("schemaVersion") == 1 and isinstance(self.snapshot.get("accounts"), dict):
+                    self._finish_smoke(app, True)
+                    return
+        if self._stopped and self._restart_count < 3 and time.monotonic() >= self._restart_at:
+            self._restart_count += 1
+            self._guard(self.restart)
+        if time.monotonic() - self._last_refresh > (0.5 if self.native_smoke else 15):
+            self._refresh()
+
+    def _finish_smoke(self, app, passed):
+        self.smoke_passed = passed
+        if passed:
+            print("Native menu bar, backend bridge and bundled credential engine: passed", flush=True)
+            app.on_quit(None)
+        else:
+            print("Native menu/backend smoke failed to obtain an account snapshot", file=sys.stderr, flush=True)
+            self.stop()
+            os._exit(1)  # testing only, isolated HOME verified before any native startup
+
+    def restart(self):
+        self.client.close()
+        self.client = BackendClient()
+        self.client.start()
+        self._stopped = False
+        self._refreshing = False
+        self._refresh()
+
+    def auto_switch_changed(self, enabled):
+        self._background(lambda: self.client.request("settings", {"values": {"autoSwitch": bool(enabled)}}))
+
+    def _choose_folder(self):
+        import AppKit
+        AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        panel = AppKit.NSOpenPanel.openPanel()
+        panel.setCanChooseFiles_(False)
+        panel.setCanChooseDirectories_(True)
+        panel.setAllowsMultipleSelection_(False)
+        panel.setMessage_("Choose a folder")
+        initial = self.snapshot.get("config", {}).get("terminalFolder")
+        if initial and Path(initial).is_dir():
+            panel.setDirectoryURL_(AppKit.NSURL.fileURLWithPath_(initial))
+        return panel.URL().path() if panel.runModal() == AppKit.NSModalResponseOK else None
+
+    def menu(self, app, rumps):
+        tools = rumps.MenuItem("Shiftbar" + (" (stopped)" if self._stopped else ""))
+        if self._stopped:
+            tools.add(rumps.MenuItem("Restart backend", callback=lambda _: self._guard(self.restart)))
+        tools.add(rumps.MenuItem("Open account dashboard", callback=lambda _: self._guard(lambda: run_terminal(app_command("--accounts")))))
+        tools.add(rumps.MenuItem("Sign in another account…", callback=lambda _: self._guard(lambda: run_terminal(app_command("--add-account")))))
+        tools.add(rumps.MenuItem("Prime fresh 5-hour windows", callback=lambda _: self._background(self._prime)))
+        prime_status = rumps.MenuItem("Auto-Prime status")
+        for line in self.snapshot.get("primeStatus", []) or ["No fresh 5-hour windows right now"]:
+            prime_status.add(rumps.MenuItem(str(line)))
+        tools.add(prime_status)
+        tools.add(self._account_tools(app, rumps))
+        tools.add(self._desktop_settings(rumps))
+        login = rumps.MenuItem("Launch at login", callback=lambda _: self._guard(self.toggle_login))
+        from claude_swap.launch_agent import plist_path
+        login.state = int(plist_path(LOGIN_LABEL).exists())
+        tools.add(login)
+        return [tools, None]
+
+    def _desktop_settings(self, rumps):
+        config = self.snapshot.get("config", {})
+        menu = rumps.MenuItem("Settings")
+        for key, title in (("autoPrime", "Auto-Prime"), ("autoLine", "Adaptive switch threshold"),
+                           ("quotaNotifications", "Quota notifications"),
+                           ("preserveRemoteControl", "Restore Remote Control"), ("autoProjectAccount", "Prefer folder account")):
+            value = bool(config.get(key, key in ("autoLine", "preserveRemoteControl")))
+            item = rumps.MenuItem(title, callback=lambda _, k=key, v=value: self._toggle_setting(k, not v, config))
+            item.state = int(value)
+            menu.add(item)
+        menu.add(rumps.MenuItem("Choose terminal start folder…", callback=lambda _: self._set_terminal_folder()))
+        return menu
+
+    def _prime(self):
+        status = self.client.request("prime", timeout=300)
+        self.client.events.put({"event": "notify", "title": "Auto-Prime", "body": "\n".join(status) if isinstance(status, list) and status else "No fresh 5-hour windows right now."})
+        self._refresh()
+
+    def _set_terminal_folder(self):
+        def selected():
+            folder = self._choose_folder()
+            if folder:
+                self._background(lambda: self._save_setting("terminalFolder", folder))
+        self._guard(selected)
+
+    def _toggle_setting(self, key, value, config):
+        """Save a menu toggle."""
+        self._background(lambda: self._save_setting(key, value))
+
+    def _save_setting(self, key, value):
+        self.client.request("settings", {"values": {key: value}})
+        self._refresh()
+
+    @staticmethod
+    def _input(title, message):
+        import AppKit
+        import rumps
+        AppKit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        return rumps.Window(title=title, message=message, ok="Save", cancel="Cancel", dimensions=(320, 24)).run()
+
+    def _account_tools(self, app, rumps):
+        menu = rumps.MenuItem("Account tools")
+        for number, email, _active, _display, _usage, alias, _disabled, _at in app.snapshot["accounts"]:
+            account = rumps.MenuItem(f"{number} · {alias or email}")
+            account.add(rumps.MenuItem("Open terminal…", callback=lambda _, n=number: self._claude_terminal(n)))
+            account.add(rumps.MenuItem("Set alias…", callback=lambda _, n=number: self._alias(app, n)))
+            account.add(rumps.MenuItem("Assign folder…", callback=lambda _, n=number: self._map(app, n)))
+            menu.add(account)
+        menu.add(rumps.MenuItem("Remove folder mapping…", callback=lambda _: self._map(app, None)))
+        menu.add(rumps.MenuItem("View folder mappings", callback=lambda _: self._guard(lambda: run_terminal(app_command("--engine", "map")))))
+        return menu
+
+    def _claude_terminal(self, number):
+        def opened():
+            folder = self._choose_folder()
+            if folder:
+                config = self.snapshot.get("config", {})
+                args = ["--engine", "run"]
+                mapped = False
+                if config.get("autoProjectAccount") and hasattr(self, "switcher"):
+                    from claude_swap.mappings import MappingStore
+                    mapped = MappingStore(self.switcher.backup_dir).resolve(folder) is not None
+                if not mapped:
+                    args.append(str(number))
+                if config.get("preserveRemoteControl", True):
+                    args.append("--restore-rc")
+                run_terminal(app_command(*args), cwd=folder)
+        self._guard(opened)
+
+    def _alias(self, app, number):
+        response = self._input("Account alias", "Letters, digits, dot, dash or underscore. Leave blank to remove.")
+        if response.clicked == 1:
+            def saved():
+                if response.text.strip():
+                    app.switcher.set_alias(str(number), response.text.strip())
+                else:
+                    app.switcher.unset_alias(str(number))
+                app.refresh_async()
+            self._guard(saved)
+
+    def _map(self, app, number):
+        def mapped():
+            folder = self._choose_folder()
+            if not folder:
+                return
+            from claude_swap.mappings import MappingStore
+            store = MappingStore(app.switcher.backup_dir)
+            if number is None:
+                store.remove(folder)
+            else:
+                _, email, org = app.switcher.resolve_account(str(number))
+                store.set(folder, email, org)
+            app.refresh_async()
+            self._refresh()
+        self._guard(mapped)
+
+    @staticmethod
+    def _guard(fn):
+        import rumps
+        try:
+            fn()
+        except (ClaudeSwitchError, OSError, subprocess.SubprocessError) as exc:
+            rumps.alert(title="Shiftbar", message=str(exc))
+
+    @staticmethod
+    def toggle_login():
+        from claude_swap import launch_agent
+        label = LOGIN_LABEL
+        if launch_agent.plist_path(label).exists():
+            # Do not boot out our own current process from a menu callback.
+            launch_agent.plist_path(label).unlink()
+            subprocess.run(["launchctl", "disable", launch_agent.service_target(label)], capture_output=True, check=False)
+        else:
+            subprocess.run(["launchctl", "enable", launch_agent.service_target(label)], capture_output=True, check=False)
+            # Write for the next login. Bootstrapping now would create another UI.
+            target = launch_agent.plist_path(label)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            launch_agent.log_paths(label)[0].parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(launch_agent.build_plist(app_command(), label))
+
+    def stop(self):
+        self.client.close()
+
+
+def _old_app_running(old_data: Path) -> bool:
+    """Patch Goblins still runs: its menu bar process, or its backend, which holds backend.lock exclusively (flock)."""
+    if subprocess.run(["pgrep", "-x", "Patch Goblins"], capture_output=True, check=False).returncode == 0:
+        return True
+    lock = old_data / "backend.lock"
+    if not lock.is_file():
+        return False
+    import fcntl
+    with open(lock, "rb") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+    return False
+
+
+def migrate_from_patch_goblins(home: Path | None = None, running=_old_app_running) -> None:
+    """One-time carry-over from the pre-rename Patch Goblins: its data folder and its login item.
+
+    Raises while it still runs: two menu bars must never manage the same accounts. Engine data
+    (~/.claude-swap-backup, the Keychain service) never moved and is not touched.
+    """
+    if env_value("DATA"):
+        return  # an isolated instance
+    from claude_swap.launch_agent import build_plist, log_paths, plist_path
+    home = home or Path.home()
+    support = home / "Library" / "Application Support"
+    old, new = support / "patch-goblins", support / "shiftbar"
+    old_agents = [path for path in (plist_path(label, home) for label in _OLD_LOGIN_LABELS) if path.exists()]
+    if not old.is_dir() and not old_agents:
+        return
+    if running(old):
+        raise ClaudeSwitchError("The old Patch Goblins app is still running. Quit it (menu bar, Quit), "
+                                "then open Shiftbar again: it carries over your settings.")
+    # Patch Goblins' throwaway Terminal launch scripts lived beside its data folder, not in it.
+    shutil.rmtree(support / "Patch Goblins" / "terminal", ignore_errors=True)
+    with contextlib.suppress(OSError):
+        (support / "Patch Goblins").rmdir()
+    if old.is_dir() and not new.exists():
+        old.rename(new)
+    elif old.is_dir():
+        # A Shiftbar folder that already exists (a log from an earlier start, say) keeps its entries; the rest move in.
+        for entry in old.iterdir():
+            if not (new / entry.name).exists():
+                try:
+                    entry.rename(new / entry.name)
+                except OSError:
+                    pass  # one locked entry stays behind; the rest move
+        if not any(old.iterdir()):
+            old.rmdir()
+    if old_agents:
+        for path in old_agents:
+            path.unlink(missing_ok=True)
+        target = plist_path(LOGIN_LABEL, home)
+        if not target.exists():  # launch at login was on: it stays on under the new label
+            log_paths(LOGIN_LABEL, home)[0].parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(build_plist(app_command(), LOGIN_LABEL, home))
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] in ("--engine", "--python-dispatch"):
+        args.pop(0)
+        from claude_swap.cli import main as engine_main
+        sys.argv = ["cswap", *args]
+        engine_main()
+        return
+    parser = argparse.ArgumentParser(prog="shiftbar")
+    parser.add_argument("mode", nargs="?", choices=["menubar"], default="menubar")
+    parser.add_argument("--accounts", action="store_true", help="Open the existing account dashboard")
+    parser.add_argument("--add-account", action="store_true", help="Sign in through the official Claude CLI in an isolated profile")
+    parser.add_argument("--native-smoke", action="store_true", help=argparse.SUPPRESS)
+    options = parser.parse_args(args)
+    try:
+        if options.add_account:
+            print("Added account: " + add_account())
+        elif options.accounts:
+            from claude_swap.switcher import ClaudeAccountSwitcher
+            from claude_swap.tui.app import CswapApp
+            app = CswapApp(ClaudeAccountSwitcher())
+            app.TITLE = "Shiftbar · accounts"
+            app.run()
+        else:
+            if sys.platform != "darwin":
+                raise ClaudeSwitchError("The native menu bar is available on macOS only. Use --accounts for the account dashboard.")
+            from claude_swap import menubar
+            from claude_swap.switcher import ClaudeAccountSwitcher
+            icon = resources() / "shiftbar.png"
+            if options.native_smoke:
+                smoke_home = env_value("SMOKE_HOME")
+                smoke_data = env_value("DATA")
+                if not smoke_home or not smoke_data or Path(smoke_home).resolve() != Path.home().resolve() or not Path(smoke_data).resolve().is_relative_to(Path(smoke_home).resolve()):
+                    raise ClaudeSwitchError("Native smoke requires an explicitly isolated HOME and SHIFTBAR_DATA.")
+                profile = Path(smoke_home) / "claude-smoke"
+                profile.mkdir(mode=0o700, exist_ok=True)
+                os.environ["CLAUDE_CONFIG_DIR"] = str(profile)
+                os.environ["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = str(profile)
+            migrate_from_patch_goblins()  # after the smoke guard: an isolated (smoke) instance never migrates
+            extension = MenuExtension(native_smoke=options.native_smoke)
+            menubar.run(ClaudeAccountSwitcher(), extension=extension, app_name="Shiftbar", icon=icon if icon.is_file() else None)
+            if options.native_smoke:
+                if not extension.smoke_passed:
+                    raise ClaudeSwitchError("Native menu/backend smoke did not obtain an account snapshot.")
+                print("Native menu bar, backend bridge and bundled credential engine: passed")
+    except (ClaudeSwitchError, OSError) as exc:
+        print(f"Shiftbar: {exc}", file=sys.stderr)
+        if sys.platform == "darwin" and not options.native_smoke and not options.add_account and not options.accounts:
+            _alert(str(exc))  # a menu bar app opened from Finder has no terminal: say it where the user looks
+        raise SystemExit(1) from None
+
+
+def _alert(message: str) -> None:
+    # The message goes in as an argument, never into the script's text.
+    script = ["-e", "on run argv", "-e", 'display alert "Shiftbar" message (item 1 of argv)', "-e", "end run"]
+    with contextlib.suppress(OSError, subprocess.SubprocessError):
+        subprocess.run(["/usr/bin/osascript", *script, message], check=False, timeout=600)
+
+
+if __name__ == "__main__":
+    main()

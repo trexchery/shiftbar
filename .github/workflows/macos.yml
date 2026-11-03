@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths-ignore: ['**.md', 'assets/**', 'docs/**']
   push:
-    branches: [feat/macos-parity]
     tags: ['v*']
   workflow_dispatch:
 
@@ -17,13 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  native-orchestration:
+  backend:
     runs-on: macos-latest
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [0, 1, 2, 3]
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,20 +30,18 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Install Python engine dependencies
         run: uv sync --locked --python python3.12
-      - name: Shared orchestration and process lifecycle shard
-        run: python3 macos/test-backend.py --shard ${{ matrix.shard }} --count 4
-      - name: Real desktop executable, private IPC, and owner approvals
+      - name: Shared backend suite
+        run: dotnet test dock/Shiftbar.Backend.Tests/Shiftbar.Backend.Tests.csproj --nologo --logger "trx;LogFileName=macos-backend.trx" --results-directory TestResults
+      - name: Real desktop executable and private IPC
         env:
-          PATCH_GOBLINS_TEST_BACKEND: ${{ github.workspace }}/dock/PatchGoblins.Backend/bin/Debug/net8.0/patch-goblins-backend
+          SHIFTBAR_TEST_BACKEND: ${{ github.workspace }}/dock/Shiftbar.Backend/bin/Debug/net8.0/shiftbar-backend
         run: uv run --python python3.12 pytest tests/test_backend_host.py -n 0
       - name: Upload verification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: macos-verification-${{ matrix.shard }}
-          path: |
-            TestResults/*.trx
-            TestResults/shard-*.json
+          name: macos-verification
+          path: TestResults/*.trx
           if-no-files-found: ignore
 
   apple-silicon:
@@ -68,11 +61,11 @@ jobs:
       - name: Upload Apple Silicon application
         uses: actions/upload-artifact@v4
         with:
-          name: patch-goblins-macos-arm64
+          name: shiftbar-macos-arm64
           path: |
-            dist/patch-goblins-macos-arm64.zip
-            dist/patch-goblins-macos-arm64.zip.sha256
-            dist/patch-goblins-macos-arm64.dmg
-            dist/patch-goblins-macos-arm64.dmg.sha256
+            dist/shiftbar-macos-arm64.zip
+            dist/shiftbar-macos-arm64.zip.sha256
+            dist/shiftbar-macos-arm64.dmg
+            dist/shiftbar-macos-arm64.dmg.sha256
           if-no-files-found: error
           retention-days: 30

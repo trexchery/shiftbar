@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>shiftbar-backend</AssemblyName>
+    <Version>0.7.0</Version>
+    <Product>Shiftbar</Product>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Shiftbar/Engine.cs" Link="Shared/Engine.cs" />
+    <Compile Include="../Shiftbar/Models.cs" Link="Shared/Models.cs" />
+    <Compile Include="../Shiftbar/DockSettings.cs" Link="Shared/DockSettings.cs" />
+    <Compile Include="../Shiftbar/Security.cs" Link="Shared/Security.cs" />
+    <Compile Include="../Shiftbar/Projects.cs" Link="Shared/Projects.cs" />
+    <Compile Include="../Shiftbar/Format.cs" Link="Shared/Format.cs" />
+    <Compile Include="../Shiftbar/AutoPrime.cs" Link="Shared/AutoPrime.cs" />
+    <Compile Include="../Shiftbar/SwitchLine.cs" Link="Shared/SwitchLine.cs" />
+    <Compile Include="../Shiftbar/LimitWatch.cs" Link="Shared/LimitWatch.cs" />
+    <Compile Include="../Shiftbar/ResumeStopped.cs" Link="Shared/ResumeStopped.cs" />
+    <Compile Include="../Shiftbar/QuotaAlerts.cs" Link="Shared/QuotaAlerts.cs" />
+    <InternalsVisibleTo Include="Shiftbar.Backend.Tests" />
+  </ItemGroup>
+</Project>

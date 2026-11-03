@@ -2878,7 +2878,7 @@ class ClaudeAccountSwitcher:
         session_dir = self._session_dir(account_num, email)
         sessions, _ = scan_live_sessions(session_dir)
         pids = [s.pid for s in sessions]
-        # A headless claude (`cswap run N -- -p`, Patch Goblins agents) writes no
+        # A headless claude (`cswap run N -- -p`) writes no
         # session record; its live wrapper still owns the profile's tokens.
         try:
             wrappers = live_run_marker_pids(session_dir, ignore=os.getpid())

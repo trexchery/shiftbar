@@ -1,97 +1,99 @@
-"""Writes the README's SVG art from the goblin sprite in make-icon.py: assets/readme/hero.svg and workflow.svg.
-Run: python dock/tools/make-readme-art.py"""
+"""Composes the README hero (assets/readme/hero.png) and the 1280x640 social preview (assets/social-preview.png) from
+the mark and two real renders: assets/readme/flyout.png and toast.png.
+
+Those two come from the tray's own render tests (synthetic accounts, no real emails). Regenerate them with
+    $env:PG_TEST_SCALE=2; $env:DOCK_RENDER_SESSIONS_OUT="$PWD\assets\readme\flyout.png"
+    $env:DOCK_RENDER_TOAST_ACTION_OUT="$PWD\assets\readme\toast.png"
+    dotnet test dock/Shiftbar.Tests/Shiftbar.Tests.csproj -c Release --filter FullyQualifiedName~RenderTests.SessionsPaceKeyboardAndToastAction
+Run: uv run --with pillow dock/tools/make-readme-art.py"""
 import importlib.util
 from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageFilter
+
 ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("icon", Path(__file__).with_name("make-icon.py"))
+spec = importlib.util.spec_from_file_location("make_icon", Path(__file__).with_name("make-icon.py"))
 icon = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(icon)
 
-BG0, BG1 = "#0d1810", "#16281a"
-FG, MUTED, GREEN, YELLOW, AMBER, GREY = "#eef4e6", "#8fa98f", "#8dd258", "#ffe24d", "#e3a33b", "#6b7a6b"
-SANS = "'Segoe UI Variable Display','Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif"
-MONO = "'Cascadia Mono',Consolas,'SFMono-Regular',Menlo,monospace"
+INDIGO = (139, 147, 255)
+TEXT = (234, 236, 248)
+MUTED = (156, 160, 190)
 
 
-def goblin(x, y, px, rows=icon.SPRITE):
-    """The sprite as merged runs of rects (one per same-colour run in a row) at (x, y), px per pixel."""
-    out = []
-    for r, row in enumerate(rows):
-        c = 0
-        while c < 16:
-            ch, end = row[c], c
-            while end < 16 and row[end] == ch:
-                end += 1
-            if icon.PALETTE[ch]:
-                out.append(f'<rect x="{x + c * px}" y="{y + r * px}" width="{(end - c) * px}" height="{px}" fill="#%02x%02x%02x"/>' % icon.PALETTE[ch])
-            c = end
-    return "\n".join(out)
+def backdrop(w, h):
+    img = Image.new("RGB", (w, h))
+    d = ImageDraw.Draw(img)
+    for y in range(h):  # a quiet vertical glow, low and dark
+        t = y / h
+        d.line([(0, y), (w, y)], fill=(int(16 + 8 * t), int(17 + 10 * t), int(30 + 22 * t)))
+    return img
 
 
-def svg(w, h, title, desc, body):
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-labelledby="t d">
-<title id="t">{title}</title>
-<desc id="d">{desc}</desc>
-<defs>
-<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{BG0}"/><stop offset="1" stop-color="{BG1}"/></linearGradient>
-<pattern id="px" width="24" height="24" patternUnits="userSpaceOnUse"><rect x="11" y="11" width="2" height="2" fill="{GREEN}" opacity="0.07"/></pattern>
-</defs>
-<rect width="{w}" height="{h}" rx="20" fill="url(#bg)"/>
-<rect width="{w}" height="{h}" rx="20" fill="url(#px)"/>
-{body}
-</svg>
-"""
+def shot(name, height=None, width=None):
+    im = Image.open(ROOT / "assets" / "readme" / name).convert("RGBA")
+    s = (height / im.height) if height else (width / im.width)
+    return im.resize((round(im.width * s), round(im.height * s)), Image.LANCZOS)
 
 
-def card(x, y, name, dot, job):
-    """One team member: a small goblin, its name, and the job line with the flyout's coloured dot."""
-    return f"""<g>
-<rect x="{x}" y="{y}" width="252" height="92" rx="12" fill="#0a130c" stroke="#24402a"/>
-{goblin(x + 16, y + 22, 3)}
-<text x="{x + 80}" y="{y + 40}" font-family="{SANS}" font-size="22" font-weight="600" fill="{FG}">{name}</text>
-<rect x="{x + 80}" y="{y + 56}" width="8" height="8" fill="{dot}"/>
-<text x="{x + 96}" y="{y + 65}" font-family="{MONO}" font-size="18" fill="{MUTED}">{job}</text>
-</g>"""
+def place(img, im, xy, radius=10):
+    """Pastes `im` with rounded corners, a hairline border and a soft shadow."""
+    x, y = xy
+    mask = Image.new("L", im.size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, im.width - 1, im.height - 1), radius, fill=255)
+    shadow = Image.new("RGBA", (im.width + 120, im.height + 120), (0, 0, 0, 0))
+    ImageDraw.Draw(shadow).rounded_rectangle((60, 70, 60 + im.width, 70 + im.height), radius, fill=(0, 0, 0, 150))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(24))
+    img.paste(shadow, (x - 60, y - 60), shadow)
+    img.paste(im, (x, y), mask)
+    ImageDraw.Draw(img).rounded_rectangle((x, y, x + im.width - 1, y + im.height - 1), radius, outline=(70, 74, 110), width=1)
 
 
-def hero(tagline, sub):
-    cards = [("you", GREEN, "terminal open"), ("Snag", GREEN, "#42 · reviewing"),
-             ("Grub", GREEN, "#57 · working"), ("Mossy", AMBER, "resting · 1h")]
-    body = goblin(64, 52, 15) + f"""
-<text x="344" y="118" font-family="{SANS}" font-size="84" font-weight="700" fill="{GREEN}" letter-spacing="-1">Patch Goblins</text>
-<text x="348" y="172" font-family="{SANS}" font-size="32" fill="{FG}">{tagline}</text>
-<text x="348" y="214" font-family="{MONO}" font-size="20" fill="{MUTED}">{sub}</text>
-""" + "\n".join(card(64 + i * 272, 300, *c) for i, c in enumerate(cards))
-    return svg(1200, 420, "Patch Goblins: " + tagline,
-               "A green pixel-art goblin beside the name, and four goblins of a team: one is yours, two are building pull requests, one is resting until its quota resets.", body)
+def hero(path):
+    w, h = 1600, 760
+    img = backdrop(w, h)
+    d = ImageDraw.Draw(img)
+    tile = icon.mark(132)
+    img.paste(tile, (100, 150), tile)
+    title = icon.font(["C:/Windows/Fonts/segoeuib.ttf", "DejaVuSans-Bold.ttf"], 108)
+    sub = icon.font(["C:/Windows/Fonts/segoeui.ttf", "DejaVuSans.ttf"], 42)
+    small = icon.font(["C:/Windows/Fonts/segoeui.ttf", "DejaVuSans.ttf"], 30)
+    d.text((262, 142), "Shiftbar", font=title, fill=INDIGO)
+    d.text((104, 330), "Every Claude account, one tray.", font=sub, fill=TEXT)
+    for i, line in enumerate(["Switch the default login without closing a session.",
+                              "Run accounts side by side in their own terminals.",
+                              "See every limit; carry on when one is hit."]):
+        d.text((104, 420 + i * 48), line, font=small, fill=MUTED)
+    flyout = shot("flyout.png", height=676)
+    place(img, flyout, (w - flyout.width - 130, 42))
+    toast = shot("toast.png", width=470)
+    place(img, toast, (w - flyout.width - 130 - 250, h - toast.height - 60), radius=8)
+    img.save(path, optimize=True)
 
 
-def workflow():
-    steps = [("1", "you", "set a goal or", "point at issues"), ("2", "Director", "plans steps,", "picks model + effort"),
-             ("3", "goblins", "build, one worktree", "per spare account"), ("4", "checks", "your tests, then", "a fresh review"),
-             ("5", "pull request", "opened for you;", "you merge")]
-    parts, x = [], 40
-    for i, (n, head, l1, l2) in enumerate(steps):
-        hl = i == 4
-        parts.append(f"""<rect x="{x}" y="40" width="200" height="150" rx="12" fill="{'#183a1d' if hl else '#0a130c'}" stroke="{GREEN if hl else '#24402a'}"/>
-<rect x="{x + 18}" y="58" width="30" height="30" fill="{YELLOW if hl else GREEN}"/>
-<text x="{x + 33}" y="80" text-anchor="middle" font-family="{MONO}" font-size="20" font-weight="700" fill="#0d1810">{n}</text>
-<text x="{x + 18}" y="122" font-family="{SANS}" font-size="24" font-weight="600" fill="{FG}">{head}</text>
-<text x="{x + 18}" y="150" font-family="{SANS}" font-size="18" fill="{MUTED}">{l1}</text>
-<text x="{x + 18}" y="173" font-family="{SANS}" font-size="18" fill="{MUTED}">{l2}</text>""")
-        if i < 4:
-            parts.append(f'<g fill="{GREEN}"><rect x="{x + 208}" y="111" width="12" height="8"/><rect x="{x + 220}" y="107" width="4" height="16"/><rect x="{x + 224}" y="111" width="4" height="8"/></g>')
-        x += 228
-    return svg(1200, 230, "How Patch Goblins works",
-               "Five steps: you set a goal, the Director plans, goblins build in worktrees on spare accounts, your tests and a fresh review check the change, and a pull request waits for you to merge.",
-               "\n".join(parts))
+def social(path):
+    w, h = 1280, 640
+    img = backdrop(w, h)
+    d = ImageDraw.Draw(img)
+    tile = icon.mark(112)
+    img.paste(tile, (80, 90), tile)
+    title = icon.font(["C:/Windows/Fonts/segoeuib.ttf", "DejaVuSans-Bold.ttf"], 92)
+    sub = icon.font(["C:/Windows/Fonts/segoeui.ttf", "DejaVuSans.ttf"], 36)
+    small = icon.font(["C:/Windows/Fonts/segoeui.ttf", "DejaVuSans.ttf"], 26)
+    d.text((216, 80), "Shiftbar", font=title, fill=INDIGO)
+    d.text((84, 262), "Every Claude account,", font=sub, fill=TEXT)
+    d.text((84, 308), "one tray.", font=sub, fill=TEXT)
+    d.text((84, 400), "Switching, side-by-side sessions,", font=small, fill=MUTED)
+    d.text((84, 436), "unified usage and limit handling", font=small, fill=MUTED)
+    d.text((84, 472), "for Claude Code. Windows and macOS.", font=small, fill=MUTED)
+    flyout = shot("flyout.png", height=560)
+    place(img, flyout, (w - flyout.width - 90, 40))
+    toast = shot("toast.png", width=400)
+    place(img, toast, (w - flyout.width - 90 - 190, h - toast.height - 60), radius=8)
+    img.save(path, optimize=True)
 
 
 if __name__ == "__main__":
-    out = ROOT / "assets" / "readme"
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "hero.svg").write_text(hero("Your Claude accounts. One coding team.",
-                                       "goals in · reviewed pull requests out · Windows 11"), encoding="utf-8")
-    (out / "workflow.svg").write_text(workflow(), encoding="utf-8")
-    print("wrote", *sorted(p.name for p in out.glob("*.svg")))
+    hero(ROOT / "assets" / "readme" / "hero.png")
+    social(ROOT / "assets" / "social-preview.png")
+    print("wrote assets/readme/hero.png, assets/social-preview.png")

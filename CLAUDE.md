@@ -1,6 +1,6 @@
-﻿# Patch Goblins
+# Shiftbar
 
-Open-source Windows 11 tray application (Patch Goblins) built on claude-swap v0.27.2.
+Open-source Claude Code multi-account manager: a Windows 11 tray app and an Apple Silicon menu bar app, built on claude-swap v0.27.2.
 
 - Preserve the upstream MIT license and attribution.
 - Reuse the existing credential, quota, and switching engines.
@@ -9,4 +9,4 @@ Open-source Windows 11 tray application (Patch Goblins) built on claude-swap v0.
 - Avoid cloud synchronization, telemetry, and inference proxies.
 - Never interrupt executing Claude Code sessions.
 - Test credential operations with synthetic credentials.
-- Develop on feat/windows-tray.
+- Branch from main; one PR per change.

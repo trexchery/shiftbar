@@ -1,6 +1,6 @@
-"""py2app entry point for the Patch Goblins menu bar application."""
+"""py2app entry point for the Shiftbar menu bar application."""
 
-from claude_swap.goblins import main
+from claude_swap.shiftbar_mac import main
 
 
 if __name__ == "__main__":

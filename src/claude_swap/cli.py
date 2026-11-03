@@ -180,7 +180,7 @@ Examples:
         action="store_true",
         help=(
             "Add --remote-control when this profile's most recent session "
-            "used Remote Control; used by Patch Goblins"
+            "used Remote Control; used by Shiftbar"
         ),
     )
     parser.add_argument(
@@ -1026,20 +1026,11 @@ def _menubar_service(args) -> int:
 def main() -> None:
     """Main entry point for the CLI."""
     if sys.platform == "win32":
-        # shutil.which must not pick up a claude/codex/grok planted in the cwd.
+        # shutil.which must not pick up a claude planted in the cwd.
         os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
     force_utf8_output()
     _use_native_tls()
     argv = sys.argv[1:]
-    # Other providers' engines (Codex CLI, Grok Build) own their whole subtree.
-    if argv and argv[0] in ("codex", "grok"):
-        import importlib
-
-        sys.exit(importlib.import_module(f"claude_swap.providers.{argv[0]}").main(argv[1:]))
-    if argv and argv[0] == "handoff":
-        from claude_swap import handoff
-
-        sys.exit(handoff.main(argv[1:]))
     if argv and argv[0] == "stats-sync":
         from claude_swap import stats_merge
 
@@ -1611,7 +1602,7 @@ The original flag spellings (%(prog)s --switch, %(prog)s --list, ...) keep worki
     # don't immediately recreate <backup_root>/cache/update_check.json inside
     # the directory we just deleted. Skipped after --upgrade as a safety guard
     # in case the dispatch is later refactored to fall through.
-    # Never in the frozen Patch Goblins bundle: it only talks to Anthropic, and
+    # Never in the frozen Shiftbar bundle: it only talks to Anthropic, and
     # an upstream PyPI release cannot upgrade a bundled engine anyway.
     if not args.purge and not args.upgrade and not args.json and not getattr(sys, "frozen", False):
         from claude_swap.update_check import check_for_update
