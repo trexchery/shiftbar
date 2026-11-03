@@ -100,9 +100,9 @@ def social(path):
     sub = font(["C:/Windows/Fonts/segoeui.ttf", "DejaVuSans.ttf"], 38)
     small = font(["C:/Windows/Fonts/consola.ttf", "DejaVuSansMono.ttf"], 26)
     d.text((520, 196), "Patch Goblins", font=title, fill=(141, 210, 88))
-    d.text((524, 322), "Your Claude accounts. One coding team.", font=sub, fill=(232, 240, 226))
-    d.text((524, 396), "A Director plans. Agents build, test,", font=small, fill=(150, 170, 150))
-    d.text((524, 432), "review, and open pull requests.", font=small, fill=(150, 170, 150))
+    d.text((524, 322), "All your Claude accounts, one tray.", font=sub, fill=(232, 240, 226))
+    d.text((524, 396), "See every limit at a glance and switch", font=small, fill=(150, 170, 150))
+    d.text((524, 432), "accounts without closing a session.", font=small, fill=(150, 170, 150))
     img.save(path, optimize=True)
 
 

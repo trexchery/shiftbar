@@ -2,7 +2,7 @@
 
 ``/stats`` ("All time") reads ``~/.claude/stats-cache.json`` (finished UTC days, frozen once computed)
 plus a live scan of today's transcripts in ``~/.claude/projects``. Accounts that run through
-``cswap run`` (terminals, goblins, Auto-Prime, reopened windows) write their transcripts to
+``cswap run`` (terminals, Auto-Prime, reopened windows) write their transcripts to
 ``<backup>/sessions/<n>-<email>/projects`` instead, so the default ``/stats`` never sees them.
 
 This replays Claude Code's own aggregation (2.1.316, cache format 5) over those transcripts and adds
