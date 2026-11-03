@@ -1,134 +1,124 @@
 <p align="center">
-  <img src="assets/readme/hero.svg" width="100%" alt="Patch Goblins: your Claude accounts, one coding team. A pixel-art goblin beside four team members: you, two goblins building pull requests, and one resting until its quota resets.">
+  <img src="assets/readme/hero.png" width="100%" alt="Shiftbar: every Claude account, one tray. The tray flyout lists two accounts with 5-hour and weekly meters and the open Claude Code sessions, and a toast offers Continue on personal for a session that stopped at its limit.">
 </p>
 
 <p align="center">
-  <a href="https://github.com/trexchery/patch-goblins/releases/latest"><img src="https://img.shields.io/github/v/release/trexchery/patch-goblins?style=flat-square&color=56a83e&label=download" alt="Latest release"></a>
-  <img src="https://img.shields.io/badge/Windows%2011-x64-2e6b30?style=flat-square" alt="Windows 11 x64">
-  <a href="docs/macos.md"><img src="https://img.shields.io/badge/macOS-Apple%20Silicon-2e6b30?style=flat-square" alt="macOS Apple Silicon"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2e6b30?style=flat-square" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/telemetry-none-2e6b30?style=flat-square" alt="No telemetry">
+  <a href="https://github.com/trexchery/shiftbar/releases/latest"><img src="https://img.shields.io/github/v/release/trexchery/shiftbar?style=flat-square&color=4F5BD5&label=release" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/Windows%2011-x64-4F5BD5?style=flat-square" alt="Windows 11 x64">
+  <a href="docs/macos.md"><img src="https://img.shields.io/badge/macOS-Apple%20Silicon-4F5BD5?style=flat-square" alt="macOS Apple Silicon"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4F5BD5?style=flat-square" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/telemetry-none-4F5BD5?style=flat-square" alt="No telemetry">
 </p>
+
+<h3 align="center">Every Claude account, one tray.</h3>
 
 <p align="center">
-  <b>Stop rationing your week.</b> When one Claude account hits its limit, the others sit idle.<br>
-  Patch Goblins sends work to whichever account has room: goblins build, test, and review your issues, then open pull requests you merge.
+  Shiftbar is a multi-account manager for <a href="https://docs.anthropic.com/en/docs/claude-code">Claude Code</a>.<br>
+  See every account's limits, move to the one with room, run several side by side, and carry on when one runs out.
 </p>
+
+## What it does
+
+### Switching that never interrupts a session
+- **One click, one keystroke.** Switch from the flyout, the tray menu or the arrow keys. **Use best** moves to the account with the most room.
+- **Windows are never closed, killed or restarted.** Shiftbar moves the default login; it takes the same credential locks Claude Code uses, so a switch never collides with a token refresh.
+- **Held out when you say so.** An account you exclude is skipped by auto-switch and **Use best**, and an account whose login has expired is flagged.
+
+### Isolated concurrent sessions
+- **A terminal per account.** **Open terminal** starts Claude Code as that account, in the folder you pick, while every other window stays on its own account (`cswap run`). Switching and auto-switch never touch that terminal, and each account keeps its own chat history. Opening one as the account that is already the default login runs plain `claude`, which follows later switches.
+- **Folder pins.** Assign a project folder to an account; with **Use project accounts** on, a terminal opened there uses it.
+- **A Sessions panel** lists the open Claude Code windows with their account, state and age, and opens a terminal in the same folder on the same account.
+
+### Unified usage
+- **5-hour and weekly meters** for every account, with each model's own weekly window where Anthropic reports one, and reset times.
+- **Pace forecast.** Each row says whether the weekly window lasts to its reset ("weekly on pace", "weekly runs out in 19h").
+- **Cross-account summary** in the header and the tray tooltip: "2 of 3 accounts have room, next reset in 1h".
+- **One `/stats`.** Usage from your other accounts is added to the "All time" view of your normal `claude` (see below).
+
+### Limit handling
+- **Auto-switch (opt-in).** Moves the default login off an account near its limit. The switch line adapts to how fast the account is burning quota (80 to 98%), or stays at a fixed threshold you choose. A usage-limit error in any window triggers it within seconds.
+- **Continue on &lt;best&gt;.** When a session stops at a limit, a toast and the Sessions panel offer to reopen it in the same folder on the account with the most room, conversation resumed. The stopped window stays open until you close it.
+- **Remote Control reconnect (Windows).** A switch drops Remote Control in running windows. Shiftbar types `/remote-control` into idle windows that had it, only when the prompt is empty and you have been away from the keyboard.
+- **Quota alerts (opt-in).** Notifications near a limit (80%), at it and when it resets.
+- **Auto-Prime (opt-in).** Starts an account's fresh 5-hour window early with one tiny request, so it also resets early.
 
 <p align="center">
-  <img src="assets/readme/proof.png" width="100%" alt="Left: the Patch Goblins agents terminal, Claude Code with a green pixel goblin in place of its mascot and a Patch Goblins status line. Right: the tray flyout listing five accounts with 5-hour and weekly quota meters; two are working on pull requests, one is resting near its limit.">
+  <img src="assets/readme/flyout.png" width="300" alt="The flyout with two synthetic accounts, a weekly pace line on each, and a Sessions list in which the top session stopped at its limit and offers Continue on personal.">
+  &nbsp;&nbsp;&nbsp;
+  <img src="assets/readme/toast.png" width="420" alt="A toast reading: work stopped at work's limit. Continue it on personal. With a Continue on personal button.">
 </p>
-
-## How it works
-
-<p align="center">
-  <img src="assets/readme/workflow.svg" width="100%" alt="Five steps: you set a goal or point at issues; the Director plans steps and picks a model and effort; goblins build, each in its own worktree on a spare account; your tests run, then a fresh read-only review; a pull request is opened and you merge.">
-</p>
-
-Type a goal into the agents terminal, like `goal: the app has a settings page; npm test must pass`, or say *"work through the open issues"*. That is the whole interface.
-
-## Why it's different
-
-- **🟢 Spare quota becomes finished work.** Every run is routed to the account with the most room in that model's own weekly window. Goblins step aside while you're using an account, rest near their limits, and pick up again when a window resets.
-- **🧪 Nothing reaches you unchecked.** Each change runs your verification command, then gets a fresh read-only review. Failures go back to the same session, and the model or effort is raised only when it has to be.
-- **🔒 Goblins can't push.** Their environment has no GitHub login. Patch Goblins pushes only after the checks pass, and holds anything that touches `.github/`. Goblins never merge, deploy, or close issues.
-- **🪟 Built for Windows, now on macOS.** A native Windows tray app, and an Apple Silicon menu bar app running the same orchestration. No WSL, Docker, or browser cookies. Logins stay on your machine: DPAPI on Windows, the Keychain on macOS.
 
 ## How it compares
 
-|  | Patch Goblins | [claude-swap](https://github.com/realiti4/claude-swap) | [Claude Squad](https://github.com/smtg-ai/claude-squad) | [Conductor](https://www.conductor.build/) |
-|---|:---:|:---:|:---:|:---:|
-| Several Claude accounts, quota meters | ✅ | ✅ | – | – |
-| Parallel agents in worktrees | ✅ | – | ✅ | ✅ |
-| Work routed by each account's quota | ✅ | – | – | – |
-| Tests + review before every PR | ✅ | – | – | manual |
-| Native Windows | ✅ tray | CLI | – (tmux) | – (macOS) |
+|  | **Shiftbar** | [claude-swap](https://github.com/realiti4/claude-swap) | [Claude Usage Tracker](https://github.com/hamed-elfayome/Claude-Usage-Tracker) | [CodexBar](https://github.com/steipete/CodexBar) | [cc-switch](https://github.com/farion1231/cc-switch) |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Platforms | Windows 11, macOS (Apple Silicon) | Windows, macOS, Linux | macOS 14+ | macOS, Linux (Windows: community ports) | Windows, macOS, Linux |
+| Interface | Tray flyout, menu bar | CLI, TUI, macOS menu bar | Menu bar, notch, statusline | Menu bar, widgets, CLI | Tray app |
+| Switches Claude Pro/Max logins | ✅ | ✅ | ✅ | – read-only | – API providers, not logins |
+| Concurrent isolated sessions | ✅ | ✅ | ✅ launchers | – | ? |
+| 5-hour and weekly usage per account | ✅ | ✅ | ✅ | ✅ | ? |
+| Auto-switch near a limit | ✅ opt-in | ✅ | ✅ | – | – provider failover only |
+| Reopen a stopped session on another account | ✅ Windows | ? | ? | – | – |
+| Reconnect Remote Control after a switch | ✅ Windows | ? | ? | – | – |
+| Where usage comes from | Claude's OAuth usage endpoint | same (it is the engine) | claude.ai endpoint (session cookie) and CLI OAuth | OAuth, cookies, CLI fallback | local logs |
+| Native Windows tray | ✅ | – | – | – | ✅ |
 
-Patch Goblins is built on claude-swap's credential and quota engine. Both are local, with no proxy and no cloud.
+<sub>Compiled 2026-11-03 from each project's README and release notes, which change. **?** means the project's own docs don't say. Shiftbar is built on claude-swap's engine, so everything `cswap` does stays available.</sub>
 
 ## Quick start
 
-**Apple Silicon macOS (12+):** see [installation, native menu bar, and verification](docs/macos.md). From a source checkout, `bash macos/install.sh` builds and installs the app. Development downloads are attached to the [macOS workflow](https://github.com/trexchery/patch-goblins/actions/workflows/macos.yml) after its packaging job succeeds. Known gaps against the Windows tray are listed there.
+**Windows 11 (x64)**
 
-**Windows 11:**
+1. Install [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+2. Download `shiftbar-win-x64.zip` from the [latest release](https://github.com/trexchery/shiftbar/releases/latest), extract it and run `shiftbar.exe`. The tray icon may sit in the overflow area; click it to open the flyout.
+3. Click **+** to add an account. A console opens with the official Claude Code login; repeat for each account.
+4. Use **Open terminal** on an account to run Claude Code as it, or switch the default login from the flyout.
 
-> Needs Windows 11 x64, [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Git for Windows](https://git-scm.com/download/win) and the [GitHub CLI](https://cli.github.com/) (`gh auth login`).
+Releases are unsigned, so SmartScreen may warn. A `.sha256` checksum ships with every download (see [SECURITY.md](SECURITY.md)).
 
-1. **Download** `patch-goblins-win-x64.zip` from the [latest release](https://github.com/trexchery/patch-goblins/releases/latest), extract it, and run `patch-goblins.exe`.
-2. **Add your team.** Open the tray icon and use **+** to sign in each Claude account through the official CLI.
-3. **Click Agents** and pick a repository. A goblin-green Claude Code terminal opens there.
-4. **Give it a goal**, then confirm the dialog. It shows the target branch and the exact verification command.
+**macOS (Apple Silicon, 12+):** a native menu bar app with switching, usage, auto-switch, quota alerts, Auto-Prime and per-account terminals. Install and gaps against Windows: [docs/macos.md](docs/macos.md).
 
-Goblins work only while that terminal is open. Close it and they pause; reopen it and they continue. Nothing runs behind your back.
+## Privacy and security
 
-## What's inside
+- **Local only.** No account, no cloud sync, no telemetry, and no proxy: your requests go from Claude Code to Anthropic as they always did. The engine talks only to Anthropic, to read usage and to refresh logins.
+- **Credentials stay on your machine and out of Git.** Backups are sealed with DPAPI on Windows and kept in the Keychain on macOS. Logs redact secrets.
+- **Never in the way.** Shiftbar does not close, kill or restart a Claude Code window. Remote Control reconnect is the one thing it ever types, and only into an idle window with an empty prompt.
+- **Auditable.** MIT licensed; the credential and switching engine is [claude-swap](https://github.com/realiti4/claude-swap)'s. Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
-<table>
-<tr>
-<td width="33%" valign="top">
+## Anthropic's terms
 
-**👥 Team**
+Shiftbar only moves your own logins around on your own machine. It does not share accounts, proxy requests or hide who you are. Still, read Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms), [Usage Policy](https://www.anthropic.com/legal/aup) and [Claude Code legal page](https://code.claude.com/docs/en/legal-and-compliance) yourself: they restrict sharing credentials and automated access, and plan limits assume ordinary individual use. **Auto-switch and Auto-Prime are off by default.** Turning them on is your call and your risk. Shiftbar is an independent project, not affiliated with or endorsed by Anthropic.
 
-- 5-hour and weekly meters for every account
-- one-click switching that never closes a session
-- pin a terminal or a folder to an account
-- Codex and Grok Build meters as visitors
+## Good to know
 
-</td>
-<td width="33%" valign="top">
+- **One `/stats` for all accounts.** Usage on your other accounts (terminals, Auto-Prime, reopened windows) is added to the "All time" view of your normal `claude` once each UTC day ends. Only `~/.claude/stats-cache.json` is written; the 7-day and 30-day tabs still show your default login only. Preview with `cswap stats-sync --dry-run`.
+- **Terminals Shiftbar opens** carry `--remote-control` when the last session in that folder used it (the **Preserve Remote Control** setting, on by default).
+- **The engine is `cswap`.** `engine\cswap.exe` ships in the zip; its documentation is [docs/claude-swap.md](docs/claude-swap.md).
 
-**🛠️ Work**
+## Upgrading from Patch Goblins
 
-- issues or goals, ordered by dependency
-- Haiku, Sonnet, or Opus, picked per step
-- one worktree and branch per step
-- resumes after crashes and restarts
-- goals can span several repositories
+Shiftbar is Patch Goblins 0.6 pivoted into a pure account manager. The autonomous agents, Codex and Grok meters and handoff are gone; switching, sessions, usage and limit handling are what is left, and they work as before.
 
-</td>
-<td width="33%" valign="top">
+1. Quit the old tray (Shiftbar refuses to start while it runs, and says so).
+2. Run `shiftbar.exe` once. Your settings carry over, your accounts and logins are untouched, and launch at login stays on if it was. Retired agent settings are ignored.
+3. Delete the old install folder when you like. Installs of handoff, Autodock and ClautoSwap upgrade the same way.
 
-**🔋 Upkeep**
-
-- auto-switch near a limit (opt-in), waiting while a default-login session is open
-- terminals and workflows stay open; resume a stopped session yourself on an account with room
-- Auto-Prime starts fresh 5-hour windows early
-- quota notifications
-- guidance for sessions stopped by a limit
-
-</td>
-</tr>
-</table>
-
-> [!IMPORTANT]
-> **Read Anthropic's terms first.** The [consumer terms](https://www.anthropic.com/legal/consumer-terms) (§3) restrict automated or scripted access to subscriptions, and Pro/Max limits assume ordinary individual use. Running agents or Auto-Prime on your accounts is your call and your risk. Agents skip API-key accounts, and stop before a subscription with extra usage turned on reaches its switch threshold.
-
-<details>
-<summary><b>Good to know</b></summary>
-
-- **You approve.** A change is held for you when two review passes still find problems. Questions get posted on the issue.
-- **Only your issues.** Issues from strangers are never picked up. Only comments from you or the repository's collaborators count.
-- **One account works too.** Agents then share it: they queue while your own terminals are busy and never close a session of yours.
-- **The goblin terminal** is a session-only theme. A small preload script swaps Claude Code's mascot glyphs for the goblin on their way to the screen. Nothing of Claude's is modified or installed.
-- **Unsigned releases**, so SmartScreen may warn. macOS builds are ad hoc signed and not notarized, so Gatekeeper may ask too. A `.sha256` checksum ships with every download. See [SECURITY.md](SECURITY.md).
-- **One `/stats` for the team.** Usage on your other accounts (goblins, account terminals, moved windows) is added to the "All time" view of your normal `claude` once each UTC day ends. Only `~/.claude/stats-cache.json` is written, each day once; a moved session counts once. The 7-day and 30-day tabs still show only your normal login's usage. Run `cswap stats-sync --dry-run` to preview.
-- **Upgrading** from handoff, Autodock, or ClautoSwap: quit the old tray and run the new exe once. Settings, agents, and logins carry over.
-
-</details>
+`PATCH_GOBLINS_*` environment variables are still read; the new names are `SHIFTBAR_*`.
 
 <details>
 <summary><b>Build from source</b></summary>
 
-Requires [uv](https://docs.astral.sh/uv/), the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0), and PowerShell 7.
+Requires [uv](https://docs.astral.sh/uv/), the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and PowerShell 7.
 
 ```powershell
-git clone https://github.com/trexchery/patch-goblins.git
-cd patch-goblins
-pwsh dock\build.ps1
+git clone https://github.com/trexchery/shiftbar.git
+cd shiftbar
+pwsh dock\build.ps1          # engine + tray + both test suites -> dist\shiftbar-win-x64.zip
 ```
+
+On Apple Silicon: `bash macos/install.sh`. Tests: `uv run pytest -q` and `dotnet test dock/Shiftbar.Tests/Shiftbar.Tests.csproj -c Release`. They use synthetic credentials only.
 
 </details>
 
-<p align="center"><img src="assets/goblin.png" width="48" alt="Patch Goblins goblin"></p>
-<p align="center"><sub>Built on <a href="https://github.com/realiti4/claude-swap">claude-swap</a> by Onur Cetinkol · Patch Goblins by trexchery · <a href="LICENSE">MIT</a></sub></p>
-<p align="center"><sub>Independent project, not affiliated with Anthropic, OpenAI, or xAI.</sub></p>
+<p align="center"><sub>Built on <a href="https://github.com/realiti4/claude-swap">claude-swap</a> by Onur Cetinkol · Shiftbar by trexchery · <a href="LICENSE">MIT</a></sub></p>
+<p align="center"><sub>Independent project, not affiliated with Anthropic.</sub></p>

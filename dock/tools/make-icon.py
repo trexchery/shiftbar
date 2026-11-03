@@ -1,6 +1,6 @@
 """Draws the Shiftbar mark (an indigo tile with two meter bars, the lower one shifted right) and writes every asset
 built from it: dock/Shiftbar/dock.ico (7 sizes, 16 to 256), assets/shiftbar.png (macOS turns it into the .icns in
-macos/build-macos.sh) and assets/social-preview.png.
+macos/build-macos.sh). The README hero and social preview are composed by make-readme-art.py.
 Run: uv run --with pillow dock/tools/make-icon.py"""
 import io
 import struct
@@ -71,27 +71,7 @@ def font(names, size):
     return ImageFont.load_default()
 
 
-def social(path):
-    w, h = 1280, 640
-    img = Image.new("RGB", (w, h))
-    d = ImageDraw.Draw(img)
-    for y in range(h):  # a quiet vertical glow, low and dark
-        t = y / h
-        d.line([(0, y), (w, y)], fill=(int(16 + 8 * t), int(17 + 10 * t), int(30 + 22 * t)))
-    tile = mark(320)
-    img.paste(tile, (120, 160), tile)
-    title = font(["C:/Windows/Fonts/segoeuib.ttf", "DejaVuSans-Bold.ttf"], 104)
-    sub = font(["C:/Windows/Fonts/segoeui.ttf", "DejaVuSans.ttf"], 38)
-    small = font(["C:/Windows/Fonts/segoeui.ttf", "DejaVuSans.ttf"], 28)
-    d.text((520, 186), "Shiftbar", font=title, fill=(139, 147, 255))
-    d.text((524, 322), "All your Claude accounts, one tray.", font=sub, fill=(234, 236, 248))
-    d.text((524, 396), "See every limit at a glance and switch", font=small, fill=(156, 160, 190))
-    d.text((524, 434), "accounts without closing a session.", font=small, fill=(156, 160, 190))
-    img.save(path, optimize=True)
-
-
 if __name__ == "__main__":
     write_ico(ROOT / "dock" / "Shiftbar" / "dock.ico")
     mark(1024).save(ROOT / "assets" / "shiftbar.png", optimize=True)  # build-macos.sh scales it to 16..1024 for the .icns
-    social(ROOT / "assets" / "social-preview.png")
-    print("wrote dock.ico, assets/shiftbar.png, assets/social-preview.png")
+    print("wrote dock.ico, assets/shiftbar.png")
