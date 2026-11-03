@@ -80,20 +80,6 @@ public static class ClaudeCli
         ?? new[] { Path.Combine(StoreSecurity.UserProfile, ".local", "bin", "claude.exe") }.FirstOrDefault(File.Exists)
         ?? Engine.FindOnPath("claude.cmd");
 
-    /// Number of running Claude Code processes (default-profile and pinned), including ones the updater
-    /// renamed to claude.exe.old.<stamp>.<pid>.
-    public static int RunningCount()
-    {
-        var procs = Process.GetProcesses();
-        var n = 0;
-        foreach (var p in procs)
-        {
-            try { if (p.ProcessName.Split('.')[0].Equals("claude", StringComparison.OrdinalIgnoreCase)) n++; } catch { }
-            p.Dispose();
-        }
-        return n;
-    }
-
     /// Official `claude auth login` against a throwaway CLAUDE_CONFIG_DIR, then
     /// `cswap enroll` imports it. The default login is never touched.
     public static Task<string> EnrollAsync(Engine engine)

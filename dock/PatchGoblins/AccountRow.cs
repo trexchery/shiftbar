@@ -2,7 +2,7 @@ using System.Drawing.Drawing2D;
 
 namespace PatchGoblins;
 
-/// One account as a slim row: name, one meta line and two hairline meters.
+/// One account as a slim row: name, one meta line, a weekly pace line when the engine gives one, and two hairline meters.
 /// Clicking expands it (animated) to show every window, reset times and actions.
 public sealed class AccountRow : Control
 {
@@ -18,6 +18,8 @@ public sealed class AccountRow : Control
     readonly DateTimeOffset _now;
     readonly List<(string Label, Window W, string? Extra)> _windows = [];
     readonly string? _note;
+    readonly (string Text, bool Warn)? _pace;
+    bool _ring;
     readonly IReadOnlyList<ProjectMapping> _projects;
     readonly string? _projectsLine; // only when every leaf name fits on one line; the context menu always lists them
     readonly ToolTip _tip = new();
@@ -31,7 +33,14 @@ public sealed class AccountRow : Control
     public Account Account => _a;
     public bool Expanded => _target > 0.5f;
 
-    int Collapsed => Ui.S(52);
+    int Collapsed => Ui.S(_pace != null ? 64 : 52);
+
+    /// The keyboard focus ring (Up/Down in the flyout).
+    public bool Ring
+    {
+        get => _ring;
+        set { if (_ring == value) return; _ring = value; Invalidate(); }
+    }
 
     public AccountRow(Account a, DateTimeOffset now, IReadOnlyList<ProjectMapping>? projects = null)
     {
@@ -53,6 +62,8 @@ public sealed class AccountRow : Control
         if (a.Usage == null && a.LastGoodUsage != null) notes.Add("showing last known usage");
         if (a.LoginExpiresAt is { } exp && exp - now < TimeSpan.FromDays(5)) notes.Add($"login expires {Format.When(exp, now)}");
         _note = notes.Count > 0 ? string.Join(" · ", notes) : null;
+        _pace = Summary.Pace(a, now);
+        Height = Collapsed; // a pace line makes the row taller
         _projects = projects ?? [];
         if (_projects.Count > 0)
         {
@@ -191,6 +202,14 @@ public sealed class AccountRow : Control
         var flags = TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine;
         TextRenderer.DrawText(g, name, NameFont, new Rectangle(x, Ui.S(9), nameWidth, NameFont.Height), _a.Disabled ? pal.Muted : pal.Text, flags);
         TextRenderer.DrawText(g, Meta(), MetaFont, new Rectangle(x, Ui.S(28), nameWidth, MetaFont.Height), pal.Muted, flags);
+        if (_pace is { } pace)
+            TextRenderer.DrawText(g, pace.Text, MetaFont, new Rectangle(x, Ui.S(44), right - x, MetaFont.Height), pace.Warn ? Palette.Warn : pal.Muted, flags);
+        if (_ring)
+        {
+            using var pen = new Pen(pal.Text, Math.Max(1, Ui.S(1)));
+            using var ring = Ui.Round(new RectangleF(0.5f, 0.5f, Width - 2, Height - 2), Ui.S(6));
+            g.DrawPath(pen, ring);
+        }
 
         // Hairline meters on the right for the windows this account has. No usage yet: two empty placeholders.
         var u = _a.ShownUsage;

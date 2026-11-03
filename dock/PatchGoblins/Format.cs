@@ -15,20 +15,6 @@ public static class Format
     public static string Age(double seconds) =>
         seconds < 3600 ? $"{(int)(seconds / 60)}m ago" : seconds < 86400 ? $"{(int)(seconds / 3600)}h ago" : $"{(int)(seconds / 86400)}d ago";
 
-    /// Compact tray tooltip (Windows caps it at 127 chars).
-    public static string Tooltip(Snapshot? s, bool auto)
-    {
-        var active = s?.Accounts.FirstOrDefault(a => a.Active);
-        var text = active == null
-            ? "Patch Goblins — no managed account active"
-            : $"Patch Goblins — {(string.IsNullOrEmpty(active.Alias) ? active.Email : active.Alias)}" +
-              (active.ShownUsage is { } u
-                  ? $"\n5h {u.FiveHour?.Pct ?? 0:0}% · week {u.SevenDay?.Pct ?? 0:0}%"
-                  : "") +
-              (auto ? "\nAuto-switch on" : "");
-        return text.Length <= 127 ? text : text[..127];
-    }
-
     /// The single, quiet balloon after a Claude switch.
     public static string SwitchNotice(AccountRef? from, AccountRef? to) =>
         (from == null ? "switched" : $"{from.Email} switched out") + $" · {to?.Email ?? "(none)"} active";

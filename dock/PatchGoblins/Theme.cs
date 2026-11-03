@@ -91,7 +91,7 @@ public static class Ui
     public static Font Icons(float pt) => new(IconFamily, pt);
 
     public const string Refresh = "\uE72C", Settings = "\uE713", More = "\uE712", Terminal = "\uE756",
-        Add = "\uE710", Check = "\uE73E", Pin = "\uE718", Unpin = "\uE77A", Close = "\uE711", Chat = "\uE8BD";
+        Add = "\uE710", Check = "\uE73E", Pin = "\uE718", Unpin = "\uE77A", Close = "\uE711", Chat = "\uE8BD", Switch = "\uE8AB";
 
     public static GraphicsPath Round(RectangleF r, float radius)
     {

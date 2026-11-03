@@ -8,11 +8,13 @@ public sealed class DashboardForm : Form
     readonly FlowLayoutPanel _list;
     readonly Label _title, _status;
     readonly Panel _header, _footer;
-    readonly Pill _pin, _close, _refresh;
+    readonly Pill _pin, _close, _refresh, _best, _settingsIcon, _add;
     readonly ToolTip _tips = new();
-    string? _expandedEmail;
+    string? _expandedEmail, _ringEmail;
     Icon? _goblin;
-    string _refreshed = "", _updated = "";
+    string _refreshed = "", _updated = "", _summary = "";
+    bool _allSessions;
+    (Snapshot? Snap, string? Error, IReadOnlyList<ProjectMapping>? Projects, IReadOnlyList<LiveSession>? Sessions, double Line) _last = (null, null, null, null, Summary.DefaultLine);
 
     /// The refresh states: `Offline` is the one the header shows; the rest live in the refresh button's tip.
     public const string Updating = "updating…", Offline = "offline";
@@ -27,7 +29,8 @@ public sealed class DashboardForm : Form
     public event Action<Account>? SwitchRequested;
     public event Action<Account>? TerminalRequested;
     public event Action<Account, string>? AccountAction;
-    public event Action? RefreshRequested, SettingsRequested, AddRequested, Moved;
+    public event Action<LiveSession>? SessionTerminalRequested, ContinueRequested;
+    public event Action? RefreshRequested, SettingsRequested, AddRequested, UseBestRequested, Moved;
     public event Action<bool>? PinToggled;
 
     public DashboardForm()
@@ -43,28 +46,32 @@ public sealed class DashboardForm : Form
         Icon = TrayIcons.App;
         Padding = new Padding(1);
 
-        // The header: the icon, the name, and under it the refresh state.
-        _header = new Panel { Dock = DockStyle.Top, Height = Ui.S(48) };
-        _header.Paint += (_, e) => e.Graphics.DrawIcon(_goblin ??= new Icon(TrayIcons.App, Ui.S(24), Ui.S(24)), new Rectangle(Ui.S(14), Ui.S(12), Ui.S(24), Ui.S(24)));
-        _title = new Label { Text = "Patch Goblins", Font = Ui.Font(9.5f, semibold: true), AutoSize = true, Location = new Point(Ui.S(46), Ui.S(7)) };
+        // The header: the icon and the name with the actions beside them, and under them, full width, the cross-account summary.
+        _header = new Panel { Dock = DockStyle.Top, Height = Ui.S(52) };
+        _header.Paint += (_, e) => e.Graphics.DrawIcon(_goblin ??= new Icon(TrayIcons.App, Ui.S(24), Ui.S(24)), new Rectangle(Ui.S(14), Ui.S(14), Ui.S(24), Ui.S(24)));
+        _title = new Label { Text = "Patch Goblins", Font = Ui.Font(9.5f, semibold: true), AutoSize = true, Location = new Point(Ui.S(46), Ui.S(9)) };
         _status = new Label
         {
             Font = Ui.Font(8f),
             AutoSize = false,
             AutoEllipsis = true,
-            Location = new Point(Ui.S(46), Ui.S(27)),
-            Size = new Size(Width - Ui.S(46) - 4 * Ui.S(30) - Ui.S(14), Ui.S(16)),
+            Location = new Point(Ui.S(46), Ui.S(31)),
+            Size = new Size(Width - Ui.S(46) - Ui.S(14), Ui.S(16)),
         };
-        var settings = HeaderIcon(Ui.Settings, "Settings", 0);
-        var add = HeaderIcon(Ui.Add, "Add account", 1);
-        _pin = HeaderIcon(Ui.Pin, "Pin to desktop", 2);
-        _close = HeaderIcon(Ui.Close, "Hide", 3);
+        _best = HeaderIcon(Ui.Switch, "Use the account with the most room");
+        _settingsIcon = HeaderIcon(Ui.Settings, "Settings");
+        _add = HeaderIcon(Ui.Add, "Add account");
+        _pin = HeaderIcon(Ui.Pin, "Pin to desktop");
+        _close = HeaderIcon(Ui.Close, "Hide");
         _close.Visible = false;
-        settings.Click += (_, _) => SettingsRequested?.Invoke();
-        add.Click += (_, _) => AddRequested?.Invoke();
+        _best.Enabled = false;
+        _best.Click += (_, _) => UseBestRequested?.Invoke();
+        _settingsIcon.Click += (_, _) => SettingsRequested?.Invoke();
+        _add.Click += (_, _) => AddRequested?.Invoke();
         _pin.Click += (_, _) => { SetPinned(!Pinned); PinToggled?.Invoke(Pinned); };
         _close.Click += (_, _) => Hide();
-        _header.Controls.AddRange([_title, _status, settings, add, _pin, _close]);
+        _header.Controls.AddRange([_title, _status, _best, _settingsIcon, _add, _pin, _close]);
+        LayoutIcons();
         foreach (var c in new Control[] { _header, _title, _status }) c.MouseDown += DragWindow;
 
         _list = new FlowLayoutPanel
@@ -94,17 +101,59 @@ public sealed class DashboardForm : Form
         Controls.Add(_footer);
         ApplyTheme();
         Deactivate += (_, _) => { if (!Pinned && HoldOpen == 0) Hide(); };
-        KeyDown += (_, e) => { if (e.KeyCode == Keys.Escape) { if (_settings != null) CloseSettings(); else Hide(); } };
         ResizeEnd += (_, _) => { if (Pinned) Moved?.Invoke(); };
     }
 
-    Pill HeaderIcon(string glyph, string tip, int slot)
+    Pill HeaderIcon(string glyph, string tip)
     {
         var b = new Pill("", PillStyle.Icon, glyph) { TabStop = false };
-        b.Location = new Point(Width - Ui.S(14) - (slot + 1) * Ui.S(30), Ui.S(10));
         _tips.SetToolTip(b, tip);
         return b;
     }
+
+    /// The header's actions right to left, Hide only while pinned: Hide, Pin, Add, Settings, Use best.
+    void LayoutIcons()
+    {
+        var x = Width - Ui.S(14);
+        foreach (var b in new[] { _close, _pin, _add, _settingsIcon, _best }.Where(b => b.Visible))
+        {
+            x -= Ui.S(30);
+            b.Location = new Point(x, Ui.S(5));
+        }
+    }
+
+    /// Esc hides (or leaves settings); Up/Down move a focus ring across the account rows; Enter switches to the ringed row.
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData) => HandleKey(keyData) || base.ProcessCmdKey(ref msg, keyData);
+
+    /// True when the key was the flyout's own.
+    internal bool HandleKey(Keys keyData)
+    {
+        if (keyData == Keys.Escape) { if (_settings != null) CloseSettings(); else Hide(); return true; }
+        if (_settings != null || keyData is not (Keys.Up or Keys.Down or Keys.Enter) || Rows().ToList() is not { Count: > 0 } rows) return false;
+        var at = rows.FindIndex(r => r.Ring);
+        if (keyData == Keys.Enter)
+        {
+            if (at < 0) return false; // no ring: Enter belongs to the focused button
+            if (!rows[at].Account.Active) SwitchRequested?.Invoke(rows[at].Account);
+            return true;
+        }
+        SetRing(rows, at < 0 ? (keyData == Keys.Down ? 0 : rows.Count - 1) : Math.Clamp(at + (keyData == Keys.Down ? 1 : -1), 0, rows.Count - 1));
+        return true;
+    }
+
+    internal bool BestEnabled => _best.Enabled;
+
+    IEnumerable<AccountRow> Rows() => _list.Controls.OfType<AccountRow>();
+
+    void SetRing(List<AccountRow> rows, int index)
+    {
+        for (var i = 0; i < rows.Count; i++) rows[i].Ring = i == index;
+        _ringEmail = rows[index].Account.Email;
+        ActiveControl = _list; // off any button, so Enter is the ring's
+        _list.ScrollControlIntoView(rows[index]);
+    }
+
+    internal string? RingEmail => Rows().FirstOrDefault(r => r.Ring)?.Account.Email;
 
     void DragWindow(object? sender, MouseEventArgs e)
     {
@@ -121,6 +170,7 @@ public sealed class DashboardForm : Form
         _pin.Glyph = pinned ? Ui.Unpin : Ui.Pin;
         _tips.SetToolTip(_pin, pinned ? "Unpin" : "Pin to desktop");
         _close.Visible = pinned;
+        LayoutIcons();
         _pin.Invalidate();
         _header.Cursor = pinned ? Cursors.SizeAll : Cursors.Default;
     }
@@ -130,13 +180,15 @@ public sealed class DashboardForm : Form
         var pal = Palette.Current;
         BackColor = _list.BackColor = _header.BackColor = _footer.BackColor = pal.Back;
         _refresh.BackColor = pal.Back; // opaque: a transparent pill is composited twice when the window is captured
+        foreach (var b in new[] { _best, _settingsIcon, _add, _pin, _close }) b.BackColor = pal.Back;
         _title.ForeColor = pal.Text;
         _status.ForeColor = pal.Muted;
         if (IsHandleCreated) Ui.ThemeWindow(_list, pal);
         Invalidate(true);
     }
 
-    /// The refresh state: a time, or `Updating`/`Offline`. Only `Offline` shows in the header; the refresh button's tip carries the rest.
+    /// The refresh state: a time, or `Updating`/`Offline`. The header shows the cross-account summary, after "offline" when
+    /// offline; the refresh button's tip carries the rest.
     public void SetStatus(string text)
     {
         _refreshed = text;
@@ -148,7 +200,7 @@ public sealed class DashboardForm : Form
 
     void ShowStatus()
     {
-        _status.Text = _refreshed == Offline ? Offline : "";
+        _status.Text = _refreshed == Offline ? (_summary.Length > 0 ? $"{Offline} · {_summary}" : Offline) : _summary;
         _tips.SetToolTip(_refresh, _updated.Length > 0 ? "Refresh now · " + _updated : "Refresh now");
     }
 
@@ -158,11 +210,21 @@ public sealed class DashboardForm : Form
         base.Dispose(disposing);
     }
 
-    /// `projects`: folder assignments; each row shows its own.
-    public void Render(Snapshot? snap, string? error, IReadOnlyList<ProjectMapping>? projects = null)
+    /// `projects`: folder assignments; each row shows its own. `sessions`: the live Claude Code windows. `line`: the switch
+    /// line "room" is measured against.
+    public void Render(Snapshot? snap, string? error, IReadOnlyList<ProjectMapping>? projects = null, IReadOnlyList<LiveSession>? sessions = null,
+        double line = Summary.DefaultLine)
     {
+        _last = (snap, error, projects, sessions, line);
+        var now = DateTimeOffset.Now;
+        _summary = Summary.Header(snap, line, now);
+        ShowStatus();
+        var best = snap == null ? null : Summary.Best(snap.Accounts);
+        _best.Enabled = best != null;
+        _tips.SetToolTip(_best, best != null ? $"Use the account with the most room ({best.ShortName})" : "Already on the account with the most room");
+        _best.Invalidate();
         // A refresh that changes nothing shown is no rebuild: tearing every row down and back up is what flickers.
-        var shown = Fingerprint(snap, error, projects);
+        var shown = Fingerprint(snap, error, projects, sessions, line, _allSessions);
         if (shown == _shown && _list.Controls.Count > 0) return;
         _shown = shown;
         ApplyTheme();
@@ -174,7 +236,6 @@ public sealed class DashboardForm : Form
         // Copy first: Dispose removes the control, so enumerating live would skip every other one.
         foreach (var c in _list.Controls.Cast<Control>().ToList()) c.Dispose();
         _list.Controls.Clear();
-        var now = DateTimeOffset.Now;
         var any = snap is { Accounts.Count: > 0 };
         if (any || error != null) _list.Controls.Add(SectionLabel("Accounts"));
         if (error != null) _list.Controls.Add(Message("Couldn't refresh · " + error));
@@ -187,8 +248,10 @@ public sealed class DashboardForm : Form
             row.ExpandRequested += ToggleRow;
             row.SizeChanged += (_, _) => FitHeight();
             if (a.Email == _expandedEmail) row.SetExpanded(true, animate: false);
+            row.Ring = a.Email == _ringEmail;
             _list.Controls.Add(row);
         }
+        AddSessions(snap, sessions, now);
         if (!any && snap == null && error == null)
             _list.Controls.Add(Message("Loading…"));
         else if (!any && error == null)
@@ -209,13 +272,49 @@ public sealed class DashboardForm : Form
 
     string? _shown;
 
+    /// The Sessions section under the accounts: one row per live window, stopped ones first, the rest past five as "+N more".
+    /// Nothing at all when no window is open.
+    void AddSessions(Snapshot? snap, IReadOnlyList<LiveSession>? sessions, DateTimeOffset now)
+    {
+        if (sessions is not { Count: > 0 }) return;
+        _list.Controls.Add(SectionLabel("Sessions"));
+        var ordered = Sessions.Order(sessions);
+        var shown = _allSessions || ordered.Count <= Sessions.Shown ? ordered : ordered.Take(Sessions.Shown).ToList();
+        Account? Of(int? n) => n is { } k ? snap?.Accounts.FirstOrDefault(a => a.Number == k) : null;
+        foreach (var s in shown)
+        {
+            var row = new SessionRow(s, Of(s.Account), Of(s.ContinueOn), now);
+            row.TerminalClicked += x => SessionTerminalRequested?.Invoke(x);
+            row.ContinueClicked += x => ContinueRequested?.Invoke(x);
+            _list.Controls.Add(row);
+        }
+        if (shown.Count < ordered.Count)
+        {
+            var more = new Label
+            {
+                Text = $"+{ordered.Count - shown.Count} more",
+                Tag = "more",
+                ForeColor = Palette.Current.Muted,
+                Font = Ui.Font(8f),
+                AutoSize = true,
+                Cursor = Cursors.Hand,
+                Margin = new Padding(Ui.S(12), Ui.S(4), 0, Ui.S(8)),
+            };
+            more.Click += (_, _) => { _allSessions = true; Render(_last.Snap, _last.Error, _last.Projects, _last.Sessions, _last.Line); };
+            _list.Controls.Add(more);
+        }
+    }
+
     /// What a render would draw, as text: equal text, equal flyout. Minutes, not seconds, for times shown as "in 2h 5m".
-    static string Fingerprint(Snapshot? snap, string? error, IReadOnlyList<ProjectMapping>? projects) =>
+    static string Fingerprint(Snapshot? snap, string? error, IReadOnlyList<ProjectMapping>? projects, IReadOnlyList<LiveSession>? sessions, double line, bool allSessions) =>
         System.Text.Json.JsonSerializer.Serialize(new
         {
             snap = snap?.Accounts.Select(a => a with { UsageAgeSeconds = null, UsageFetchedAt = null }),
             error,
             projects,
+            sessions = sessions?.Select(s => new { s.Pid, s.SessionId, s.Cwd, s.Account, s.Status, s.StartedUtc, s.AtLimit, orphan = s.Stop?.Orphan, reset = s.Stop?.Limit?.ResetsAt, s.ContinueOn }),
+            line,
+            allSessions,
             minute = DateTimeOffset.Now.ToString("yyyyMMddHHmm"),
             dark = Palette.Current.IsDark,
         });
@@ -283,10 +382,10 @@ public sealed class DashboardForm : Form
         if (w == Width) return;
         var dx = w - Width;
         var right = Right;
-        foreach (var c in _header.Controls.OfType<Pill>()) c.Left += dx;
         _status.Width += dx;
         _refresh.Left += dx;
         Width = w;
+        LayoutIcons();
         if (!Pinned) Left = right - w;
     }
 

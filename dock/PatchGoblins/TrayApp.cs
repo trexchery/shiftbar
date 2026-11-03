@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace PatchGoblins;
 
-public sealed class TrayApp : ApplicationContext
+public sealed partial class TrayApp : ApplicationContext
 {
     readonly Engine _engine;
     readonly DockSettings _settings = DockSettings.Load();
@@ -64,6 +64,9 @@ public sealed class TrayApp : ApplicationContext
         _dash.RefreshRequested += () => _ = TickAsync(runAuto: false, refresh: true);
         _dash.SettingsRequested += () => { if (_dash.SettingsOpen) _dash.CloseSettings(); else _ = ShowSettingsAsync(); };
         _dash.AddRequested += () => _ = EnrollAsync(null);
+        _dash.UseBestRequested += () => _ = UseBestAsync();
+        _dash.SessionTerminalRequested += OpenSessionTerminal;
+        _dash.ContinueRequested += s => { if (s.Stop != null) _ = ContinueAsync(s.Stop); };
         _dash.VisibleChanged += (_, _) => { if (!_dash.Visible) _dashHiddenAt = DateTime.UtcNow; };
         _dash.PinToggled += pinned => { _settings.Pinned = pinned; SavePinnedPosition(); };
         _dash.Moved += SavePinnedPosition;
@@ -148,7 +151,7 @@ public sealed class TrayApp : ApplicationContext
                 Notify("Auto-Prime paused", _primeProblem, ToolTipIcon.Warning);
             fresh = _snap;
             _engine.StatsSyncTick(Program.Log);
-            if (runAuto && _settings.AutoSwitch) await ResumeStoppedAsync(_snap);
+            await ResumeStoppedAsync(_snap, recover: runAuto && _settings.AutoSwitch); // the Sessions list and stop notices always; orphan recovery with auto-switch
             _error = null;
             _dash.SetStatus($"{DateTime.Now:HH:mm}");
         }
@@ -162,13 +165,14 @@ public sealed class TrayApp : ApplicationContext
             _busy = false;
         }
         AutoPrimeTick();
-        if (_settings.QuotaNotifications && fresh != null && QuotaAlerts.Balloon(_quota.Observe(fresh.Accounts)) is { } balloon)
-            Notify(balloon.Title, balloon.Text);
+        if (_settings.QuotaNotifications && fresh != null && _quota.Observe(fresh.Accounts) is var alerts && QuotaAlerts.Balloon(alerts) is { } balloon)
+            Notify(balloon.Title, balloon.Text, action: Summary.SwitchOffer(alerts, fresh.Accounts, _settings.AutoSwitch) is { } offer
+                ? ($"Switch to {Summary.Name(offer, 14)}", () => _ = SwitchAsync(offer)) : null);
         var active = _snap?.Accounts.FirstOrDefault(a => a.Active);
         var old = _tray.Icon;
         _tray.Icon = TrayIcons.WithDot(active?.ShownUsage == null ? null : Format.Peak(active), _settings.AutoSwitch);
         if (old != TrayIcons.App) old?.Dispose();
-        _tray.Text = Format.Tooltip(_snap, _settings.AutoSwitch);
+        _tray.Text = Summary.Tooltip(_snap, _settings.AutoSwitch, Threshold);
         if (_dash.Visible) RenderDash();
         if (_pending is { } again)
         {
@@ -199,7 +203,7 @@ public sealed class TrayApp : ApplicationContext
     /// where they were last read (a missed event, or an overflow, costs nothing).
     async Task WatchAsync()
     {
-        if (_watching || !_settings.AutoSwitch) return;
+        if (_watching) return;
         _watching = true;
         try
         {
@@ -219,12 +223,12 @@ public sealed class TrayApp : ApplicationContext
     /// waits for a refresh, a tray pass or a quiet spell.
     async Task OnLimitAsync(LimitHit hit)
     {
-        if (!_settings.AutoSwitch) return;
         try
         {
             // A hit in a subagent or workflow file stops its window too: mark the session for the move pass.
             if (ResumeStopped.SubagentSession(hit.ConfigDir, hit.File) is { } sessionOf) _subagentLimits[sessionOf] = hit.Limit;
             if (_snap == null) { _ = TickAsync(runAuto: true); return; } // no reading yet: the tray pass lists, then looks at the windows
+            if (!_settings.AutoSwitch) { await ResumeStoppedAsync(_snap, recover: false); if (_dash.Visible) RenderDash(); return; } // only the stop notice, with its Continue
             var o = await _limits.OnLimitAsync(hit); // null: seen before; the windows are still looked at
             if (o?.Switched is { Switched: true } sw)
             {
@@ -247,7 +251,8 @@ public sealed class TrayApp : ApplicationContext
                 }
                 _ = TickAsync(runAuto: true); // the engine's own check, with its usage fetch; a burst coalesces into one re-run
             }
-            if (_snap != null) await ResumeStoppedAsync(_snap);
+            if (_snap != null) await ResumeStoppedAsync(_snap, recover: true);
+            if (_dash.Visible) RenderDash();
         }
         catch (Exception e) { Program.Log(e); _ = TickAsync(runAuto: true); }
     }
@@ -266,7 +271,7 @@ public sealed class TrayApp : ApplicationContext
         catch (Exception e) when (e is EngineException or IOException) { Program.Log(e); }
     }
 
-    void RenderDash() => _dash.Render(_snap, _error, ProjectMap.Load());
+    void RenderDash() => _dash.Render(_snap, _error, ProjectMap.Load(), _sessions, Threshold);
 
     async Task AutoTickAsync()
     {
@@ -311,29 +316,13 @@ public sealed class TrayApp : ApplicationContext
         }
     }
 
-    /// Reports stopped sessions without interrupting them. A terminal may contain unsaved shell
-    /// state or other tabs, and a replacement window does not prove the session actually resumed.
-    async Task ResumeStoppedAsync(Snapshot snap)
+    /// Reads the live windows and reports stopped ones without interrupting them: a terminal may contain unsaved shell
+    /// state or other tabs. `recover`: also reopen orphans (auto-switch on), the one automatic close.
+    async Task ResumeStoppedAsync(Snapshot snap, bool recover)
     {
         await _movePass.WaitAsync();
-        try { await MovePassAsync(_snap ?? snap); }
+        try { await MovePassAsync(_snap ?? snap, recover); }
         finally { _movePass.Release(); }
-    }
-
-    async Task MovePassAsync(Snapshot snap)
-    {
-        List<StoppedSession> stopped;
-        try { stopped = await Task.Run(() => ScanStops(snap, includeBusy: true)); }
-        catch (Exception e) { Program.Log(e); return; }
-        if (_engineThreshold == null) await ReadEngineThresholdAsync();
-        foreach (var s in stopped.Where(s => s.AtLimit))
-        {
-            var key = $"{s.SessionId}@{s.Limit?.ResetsAt ?? s.Limit?.At}";
-            if (!_told.Add(key)) continue;
-            var folder = Path.GetFileName(s.Cwd.TrimEnd('\\', '/'));
-            Notify("Terminal stopped at a limit", $"{folder} has reached a usage limit. When it is safe, reopen or resume the session on an account with room.", ToolTipIcon.Warning);
-        }
-        await RecoverOrphansAsync(snap, stopped.Where(s => s.Orphan).ToList());
     }
 
     static readonly TimeSpan OrphanGrace = TimeSpan.FromSeconds(90);
@@ -389,10 +378,10 @@ public sealed class TrayApp : ApplicationContext
 
     static string MovesPath => Path.Combine(DockSettings.Dir, "resumed.json");
 
-    /// A small Patch Goblins card at the bottom right (not Windows' balloon); a click opens the flyout.
-    void Notify(string title, string text, ToolTipIcon icon = ToolTipIcon.Info)
+    /// A small card at the bottom right (not Windows' balloon); a click opens the flyout. `action`: one primary button.
+    void Notify(string title, string text, ToolTipIcon icon = ToolTipIcon.Info, (string Label, Action Run)? action = null)
     {
-        Toast.Show(title, Engine.Redact(text), icon switch { ToolTipIcon.Warning => Palette.Warn, ToolTipIcon.Error => Palette.Critical, _ => null }, ShowDashboard);
+        Toast.Show(title, Engine.Redact(text), icon switch { ToolTipIcon.Warning => Palette.Warn, ToolTipIcon.Error => Palette.Critical, _ => null }, ShowDashboard, action);
     }
 
     void BuildMenu()
@@ -501,26 +490,27 @@ public sealed class TrayApp : ApplicationContext
         _ = TickAsync(runAuto: false);
     }
 
-    async Task SwitchAsync(Account a)
+    /// No confirmation: a switch never stops a running session. A toast says where new windows go.
+    Task SwitchAsync(Account a) => RunSwitchAsync(() => _engine.SwitchAsync(a.Number));
+
+    /// The header's "Use best": the engine's own `--strategy best`, which stays put unless another account is provably better.
+    Task UseBestAsync() => RunSwitchAsync(_engine.SwitchBestAsync);
+
+    async Task RunSwitchAsync(Func<Task<SwitchResult>> run)
     {
-        var running = ClaudeCli.RunningCount();
-        if (running > 0 && MessageBox.Show(
-                $"{running} Claude Code process(es) are running.\n\n" +
-                "Switching never stops them. A response already in progress finishes on the current account; " +
-                "sessions on the default login use the new account from their next message (the first one may " +
-                "use extra quota while its cache rebuilds). Terminals opened for another account keep it; " +
-                "one opened for the active account follows switches.\n\n" +
-                $"Switch to #{a.Number} {a.Email}?",
-                "Patch Goblins", MessageBoxButtons.YesNo, MessageBoxIcon.Information) != DialogResult.Yes)
-            return;
         try
         {
             Interlocked.Increment(ref _engineSwitches);
             SwitchResult r;
-            try { r = await _engine.SwitchAsync(a.Number); }
+            try { r = await run(); }
             finally { Interlocked.Decrement(ref _engineSwitches); }
-            if (r.Switched) { Switched(a.Number); Notify("", Format.SwitchNotice(r.From, r.To), ToolTipIcon.None); }
-            else Notify("No switch", r.Reason ?? "Already active");
+            if (r.Switched && r.To?.Number is { } n)
+            {
+                var name = _snap?.Accounts.FirstOrDefault(x => x.Number == n)?.ShortName ?? r.To.Email;
+                Switched(n);
+                Notify($"Switched to {name}", Summary.SwitchedText(name, r.Warnings), ToolTipIcon.None);
+            }
+            else Notify("No switch", r.Message ?? r.Reason ?? "Already active");
         }
         catch (Exception e) { Error("Switch failed", e); }
         await TickAsync(runAuto: false);

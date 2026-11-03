@@ -144,9 +144,9 @@ public class FormatTests
     {
         var acct = new Account(1, new string('x', 200) + "@example.com", true, "ok",
             new Usage(new Window(10, null), new Window(20, null), null, null));
-        var tip = Format.Tooltip(new Snapshot(1, 1, [acct]), auto: true);
+        var tip = Summary.Tooltip(new Snapshot(1, 1, [acct]), auto: true);
         Assert.True(tip.Length <= 127);
-        Assert.Equal("Patch Goblins — no managed account active", Format.Tooltip(null, false));
+        Assert.Equal("Patch Goblins — no accounts yet", Summary.Tooltip(null, false));
     }
 
     [Fact]
@@ -752,12 +752,14 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
         {
             using var form = NewForm();
             form.Render(snap, null);
+            const string summary = "2 of 3 accounts have room · next reset in 1h"; // #3 is excluded; the soonest 5-hour reset is #2's
             form.SetStatus("12:00");
-            Eq("", form.StatusText, "a refresh time is not news: the header says nothing");
+            True(form.StatusText.StartsWith(summary), $"a refresh time is not news: the header is the summary, got \"{form.StatusText}\"");
             form.SetStatus(DashboardForm.Updating);
-            Eq("", form.StatusText, "updating lives in the refresh button's tip");
+            True(form.StatusText.StartsWith(summary), $"updating lives in the refresh button's tip, got \"{form.StatusText}\"");
             form.SetStatus(DashboardForm.Offline);
-            Eq("offline", form.StatusText, "offline shows in the header");
+            True(form.StatusText.StartsWith("offline · " + summary), $"offline shows in the header, before the summary; got \"{form.StatusText}\"");
+            True(form.BestEnabled, "personal (58%) has more room than work (92%): Use best is on");
             form.SetStatus("12:00");
             form.Location = new Point(-10000, -10000); // off-screen: never steals the user's desktop
             form.Show();
@@ -830,6 +832,7 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             {
                 using var tb = new Bitmap(toast.Width, toast.Height);
                 toast.DrawToBitmap(tb, new Rectangle(0, 0, toast.Width, toast.Height));
+                toast.ActionButton!.DrawToBitmap(tb, toast.ActionButton.Bounds); // a never-shown card prints no child window
                 tb.Save(tOut);
             }
         });
@@ -900,6 +903,97 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             plain.Dispose();
         });
     }
+
+    /// The Sessions section under the accounts: stopped windows first with their Continue button, past five collapsed into
+    /// "+N more"; a weekly pace line on the rows that have one; the keyboard ring; a toast's action button.
+    /// Set DOCK_RENDER_SESSIONS_OUT=<file.png> to also save what it drew.
+    [Fact]
+    public void SessionsPaceKeyboardAndToastAction()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Window W(double p, double hours) => new(p, now.AddHours(hours));
+        var snap = new Snapshot(1, 2,
+        [
+            new Account(1, "personal@example.com", false, "ok", new Usage(W(34, 2.2), new Window(40, now.AddDays(3), WillLastToReset: true, AheadOfPace: false), null, null)),
+            new Account(2, "work@example.com", true, "ok", new Usage(W(99, 0.8),
+                new Window(81, now.AddDays(2), AheadOfPace: true, WillLastToReset: false, ProjectedExhaustionAt: now.AddHours(20)), null, null), Alias: "work"),
+        ]);
+        LiveSession S(string id, string cwd, string status, double ageH, int account) =>
+            new(100 + id.Length, id, cwd, @"C:\cfg", account, status, now.UtcDateTime.AddHours(-ageH));
+        var stopped = new StoppedSession(1, "stop", @"C:\code\api", @"C:\cfg", 2, "t.jsonl", Status: "idle", Limit: new Limit("five_hour", now.AddMinutes(48), now.AddMinutes(-1)), OwnRefused: true);
+        var sessions = new List<LiveSession>
+        {
+            S("a", @"C:\code\web", "busy", 0.5, 2), S("bb", @"C:\code\docs", "idle", 2, 1), S("ccc", @"C:\code\infra", "busy", 3, 2),
+            S("dddd", @"C:\code\cli", "waiting", 4, 1), S("eeeee", @"C:\code\site", "busy", 5, 2), S("ffffff", @"C:\code\old", "idle", 30, 1),
+            new(1, "stop", @"C:\code\api", @"C:\cfg", 2, "idle", now.UtcDateTime.AddHours(-1)) { Stop = stopped, ContinueOn = 1 },
+        };
+        Sta(() =>
+        {
+            using var form = NewForm();
+            var switched = new List<int>();
+            LiveSession? continued = null;
+            form.SwitchRequested += a => switched.Add(a.Number);
+            form.ContinueRequested += s => continued = s;
+            form.Render(snap, null, null, sessions, 95);
+            form.Show();
+            True(Until(() => form.Visible && IsWindowVisible(form.Handle)), "the flyout never showed");
+            Eq(["ACCOUNTS", "SESSIONS"], SectionLabels(form), "accounts, then sessions");
+            var rows = All(form).OfType<SessionRow>().ToList();
+            Eq(Sessions.Shown, rows.Count, "five session rows before the rest collapse");
+            Eq("stop", rows[0].Session.SessionId, "the stopped window comes first");
+            Eq("Continue on personal", rows[0].ContinueButton?.Text, "the stopped row's primary action");
+            True(rows.Skip(1).All(r => r.ContinueButton == null), "only a stop at a limit offers Continue");
+            var more = All(form).OfType<Label>().Single(l => l.Tag as string == "more");
+            Eq("+2 more", more.Text, "the collapsed rest");
+            rows[0].ContinueButton!.PerformClick();
+            Eq("stop", continued?.SessionId, "Continue reaches the dashboard's handler");
+            Eq([Ui.S(64), Ui.S(64)], FindRows(form).Select(r => r.Height).ToList(), "both accounts have a pace line");
+            True(form.BestEnabled, "personal has more room than work");
+            if (Environment.GetEnvironmentVariable("DOCK_RENDER_SESSIONS_OUT") is { Length: > 0 } outPath)
+            {
+                using var bmp = new Bitmap(form.Width, form.Height);
+                form.DrawToBitmap(bmp, new Rectangle(0, 0, form.Width, form.Height));
+                bmp.Save(outPath);
+            }
+            InvokeClick(more);
+            Eq(sessions.Count, All(form).OfType<SessionRow>().Count(), "+N more shows every session");
+            form.Render(snap, null, null, [], 95);
+            Eq(["ACCOUNTS"], SectionLabels(form), "no live window: no Sessions section");
+
+            // Keyboard: Down rings the first (active) row, Down again the next; Enter switches to it; Up stops at the top.
+            True(form.HandleKey(Keys.Down) && form.RingEmail == "work@example.com", $"Down rings the first row, got {Show(form.RingEmail)}");
+            True(form.HandleKey(Keys.Enter) && switched.Count == 0, "Enter on the active account switches nothing");
+            form.HandleKey(Keys.Down);
+            Eq("personal@example.com", form.RingEmail, "Down moves the ring");
+            form.HandleKey(Keys.Down);
+            Eq("personal@example.com", form.RingEmail, "the ring stays on the last row");
+            form.HandleKey(Keys.Enter);
+            Eq([1], switched, "Enter switches to the ringed account");
+            form.Render(snap with { Accounts = [.. snap.Accounts] }, "x", null, null, 95); // a rebuild keeps the ring
+            Eq("personal@example.com", form.RingEmail, "a rebuild keeps the ring");
+            form.HandleKey(Keys.Up); form.HandleKey(Keys.Up);
+            Eq("work@example.com", form.RingEmail, "Up stops at the top");
+            True(form.HandleKey(Keys.Escape) && !form.Visible, "Esc hides the flyout");
+
+            // A toast's one action: themed primary button, it runs and dismisses.
+            var ran = false;
+            using var plain = new Toast("work stopped at work's limit", "Continue it on personal.", Palette.Warn, null);
+            using var toast = new Toast("work stopped at work's limit", "Continue it on personal.", Palette.Warn, null, ("Continue on personal", () => ran = true));
+            True(toast.ActionButton is { Style: PillStyle.Primary } b && b.Text == "Continue on personal", "the toast has its action button");
+            True(toast.Height > plain.Height, $"the action adds a row: {toast.Height} vs {plain.Height}");
+            if (Environment.GetEnvironmentVariable("DOCK_RENDER_TOAST_ACTION_OUT") is { Length: > 0 } tOut)
+            {
+                using var tb = new Bitmap(toast.Width, toast.Height);
+                toast.DrawToBitmap(tb, new Rectangle(0, 0, toast.Width, toast.Height));
+                toast.ActionButton!.DrawToBitmap(tb, toast.ActionButton.Bounds); // a never-shown card prints no child window
+                tb.Save(tOut);
+            }
+            toast.ActionButton!.PerformClick();
+            True(ran, "clicking the action runs it");
+        });
+    }
+
+    static void InvokeClick(Control c) => typeof(Control).GetMethod("OnClick", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.Invoke(c, [EventArgs.Empty]);
 
     /// Regression: a refresh re-renders (disposing every row) while a row's menu is open.
     /// Clicking an item then closed the menu through the disposed row, which threw before the click ran.
