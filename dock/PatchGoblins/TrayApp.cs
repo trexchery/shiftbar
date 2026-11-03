@@ -66,7 +66,7 @@ public sealed partial class TrayApp : ApplicationContext
         _dash.AddRequested += () => _ = EnrollAsync(null);
         _dash.UseBestRequested += () => _ = UseBestAsync();
         _dash.SessionTerminalRequested += OpenSessionTerminal;
-        _dash.ContinueRequested += s => { if (s.Stop != null) _ = ContinueAsync(s.Stop); };
+        _dash.ContinueRequested += s => { if (s.Stop != null) _ = ContinueAsync(s.Stop, s.ContinueOn); };
         _dash.VisibleChanged += (_, _) => { if (!_dash.Visible) _dashHiddenAt = DateTime.UtcNow; };
         _dash.PinToggled += pinned => { _settings.Pinned = pinned; SavePinnedPosition(); };
         _dash.Moved += SavePinnedPosition;
@@ -303,7 +303,7 @@ public sealed partial class TrayApp : ApplicationContext
                     _lastBlockedNotice = e.Event == "error" ? e.Message : e.Reason;
                     Notify("Auto-switch can't move the default login",
                         e.Event == "error" ? e.Message ?? "engine error"
-                            : "Every account with room left is in use by a pinned terminal. Close or move that terminal's session when it is safe, and the default login can follow.",
+                            : LimitSwitch.HeldText,
                         ToolTipIcon.Warning);
                     break;
                 case "all-exhausted" when e.EarliestResetAt != _lastExhaustedNotice:

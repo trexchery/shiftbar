@@ -25,16 +25,21 @@ public static class Summary
         return accounts.Select(a => a.ShownUsage?.FiveHour?.ResetsAt).Where(r => r > now).Min();
     }
 
-    /// "3 of 4 accounts have room · next reset in 1h 12m". Empty when there is nothing listed.
+    /// "3 of 4 accounts have room · next reset in 1h 12m". Empty when there is nothing listed. An account with no reading
+    /// yet is "unknown", never "at its limit".
     public static string Header(Snapshot? snap, double line, DateTimeOffset now)
     {
         if (snap is not { Accounts.Count: > 0 } s) return "";
         var room = s.Accounts.Count(a => HasRoom(a, line));
+        var unknown = Unknown(s.Accounts);
         var text = s.Accounts.Count == 1
-            ? room == 1 ? "1 account, room left" : "1 account, at its limit"
-            : $"{room} of {s.Accounts.Count} accounts have room";
+            ? room == 1 ? "1 account, room left" : unknown == 1 ? "1 account, usage unknown" : "1 account, at its limit"
+            : $"{room} of {s.Accounts.Count} accounts have room" + (unknown > 0 ? $" · {unknown} unknown" : "");
         return NextReset(s.Accounts, line, now) is { } t ? $"{text} · next reset {Format.When(t, now)}" : text;
     }
+
+    /// Enabled accounts with no reading at all (none now, no last good one).
+    static int Unknown(IReadOnlyList<Account> accounts) => accounts.Count(a => !a.Disabled && a.ShownUsage == null);
 
     /// The account `cswap switch --strategy best` would move to, or null when none is better than the active one.
     /// Mirrors the engine's rule: enabled, read, and strictly more headroom (lower peak) than the active account; ties stay.
@@ -51,10 +56,10 @@ public static class Summary
     public static Account? SwitchOffer(IReadOnlyList<QuotaAlert> alerts, IReadOnlyList<Account> accounts, bool autoSwitch) =>
         !autoSwitch && alerts.Any(a => a.Active && a.State != QuotaState.Normal) ? Best(accounts) : null;
 
-    /// The notice after a manual switch: nothing running is interrupted, then any warning the engine gave.
+    /// The notice after a manual switch: any warning the engine gave first (the toast shows about three lines), then one
+    /// short line on what moved.
     public static string SwitchedText(string name, IReadOnlyList<string>? warnings) =>
-        $"Nothing running is interrupted. Default-login sessions and new windows use {name}; pinned terminals keep theirs."
-        + string.Concat((warnings ?? []).Select(w => "\n" + w));
+        string.Concat((warnings ?? []).Select(w => w + "\n")) + $"Default-login windows and new ones use {name}; pinned terminals keep theirs.";
 
     /// One line on the weekly window's pace: "weekly on pace", "weekly ahead of pace", "weekly runs out Thu 15:40". Null
     /// when the engine gave no pace for it. `Warn`: it runs out before it resets.
@@ -63,6 +68,8 @@ public static class Summary
         if (a.ShownUsage?.SevenDay is not { } w) return null;
         if (w.WillLastToReset == false && w.ProjectedExhaustionAt is { } t && t > now && (w.ResetsAt is not { } r || t < r))
             return ($"weekly runs out {Format.When(t, now)}", true);
+        // Will not last, with no exhaustion time ahead: already used up (the engine sets it to its reading's time), or a stale reading.
+        if (w.WillLastToReset == false) return (w.Pct >= 100 ? "weekly used up" : "weekly runs short", true);
         if (w.WillLastToReset == true) return (w.AheadOfPace == true ? "weekly ahead of pace, lasts to reset" : "weekly on pace", false);
         if (w.AheadOfPace == true) return ("weekly ahead of pace", false);
         return w.AheadOfPace == false ? ("weekly on pace", false) : null;
@@ -74,7 +81,8 @@ public static class Summary
     {
         const int Max = 127;
         if (s is not { Accounts.Count: > 0 }) return "Patch Goblins — no accounts yet";
-        var head = $"{s.Accounts.Count(a => HasRoom(a, line))} of {s.Accounts.Count} have room" + (auto ? " · auto-switch" : "");
+        var unknown = Unknown(s.Accounts);
+        var head = $"{s.Accounts.Count(a => HasRoom(a, line))} of {s.Accounts.Count} have room" + (unknown > 0 ? $" · {unknown} unknown" : "") + (auto ? " · auto-switch" : "");
         var rows = s.Accounts.OrderByDescending(a => a.Active).ThenBy(a => a.Number).ToList();
         foreach (var nameMax in new[] { 18, 12, 8 })
         {

@@ -4,21 +4,26 @@ namespace PatchGoblins;
 /// room, with the conversation resumed. The stopped window is never closed or killed; its owner closes it.
 public static class ContinueOn
 {
-    /// The account to continue on: never the stopped window's own (the new window would share its transcript), else as
-    /// `ResumeStopped.Target` picks for a stop at a limit (most room, not refused, a profile to resume in or the default login).
-    public static int? Target(StoppedSession s, IReadOnlyList<Account> accounts, Func<int, bool> hasProfile, DateTimeOffset now,
-        IReadOnlyDictionary<int, DateTimeOffset>? refusedUntil = null, IReadOnlyDictionary<(int Account, string Scope), DateTimeOffset>? scopedRefused = null) =>
-        ResumeStopped.Target(s with { AtLimit = true }, [.. accounts.Where(a => a.Number != s.Account)], hasProfile,
+    /// The account to continue on, as `ResumeStopped.Target` picks for a stop at a limit (most room, not refused). Never the
+    /// stopped window's own account, and never one whose folder is the stopped window's own or has a live claude on this
+    /// session (`holdsSession`): two windows on one transcript would collide. `dirFor`: where that account resumes (`DirFor`).
+    public static int? Target(StoppedSession s, IReadOnlyList<Account> accounts, Func<int, string?> dirFor, Func<string, bool> holdsSession, DateTimeOffset now,
+        IReadOnlyDictionary<int, DateTimeOffset>? refusedUntil = null, IReadOnlyDictionary<(int Account, string Scope), DateTimeOffset>? scopedRefused = null)
+    {
+        bool Apart(Account a) => a.Number != s.Account && dirFor(a.Number) is { } d && !ResumeStopped.SameDir(d, s.ConfigDir) && !holdsSession(d);
+        return ResumeStopped.Target(s with { AtLimit = true }, [.. accounts.Where(Apart)], _ => true,
             now: now, refusedUntil: refusedUntil, scopedRefused: scopedRefused);
+    }
 
     /// The engine arguments: `run N [--restore-rc] -- --resume <session> "A usage limit was hit. Continue."`.
     public static string[] Args(StoppedSession s, int account, bool restoreRc) =>
         Launch.Run(account, restoreRc, ResumeStopped.ResumeArgs(s with { AtLimit = true }));
 
     /// Where `--resume` must find the transcript for `account`: the default login's dir when it is the active one (`cswap
-    /// run` then runs plain `claude`), else its profile; null when that profile does not exist yet.
+    /// run` then runs plain `claude`), else its profile, or where `cswap run` creates it on the first run. Null: not listed.
     public static string? DirFor(int account, IReadOnlyList<Account> accounts) =>
-        accounts.FirstOrDefault(a => a.Number == account)?.Active == true ? ResumeStopped.DefaultDir : ResumeStopped.ProfileDir(account);
+        accounts.FirstOrDefault(a => a.Number == account) is not { } a ? null
+        : a.Active ? ResumeStopped.DefaultDir : ResumeStopped.ProfileDir(account) ?? ResumeStopped.NewProfileDir(a);
 
     /// Copies the conversation where the new window resumes it, then opens that window. `remember`: the limit error the
     /// copy carries, so the watcher does not take it for a new refusal of the target account.

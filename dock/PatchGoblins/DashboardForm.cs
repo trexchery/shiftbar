@@ -10,7 +10,7 @@ public sealed class DashboardForm : Form
     readonly Panel _header, _footer;
     readonly Pill _pin, _close, _refresh, _best, _settingsIcon, _add;
     readonly ToolTip _tips = new();
-    string? _expandedEmail, _ringEmail;
+    int? _expanded, _ring; // account numbers: one email can be two accounts (two orgs)
     Icon? _goblin;
     string _refreshed = "", _updated = "", _summary = "";
     bool _allSessions;
@@ -133,7 +133,8 @@ public sealed class DashboardForm : Form
         var at = rows.FindIndex(r => r.Ring);
         if (keyData == Keys.Enter)
         {
-            if (at < 0) return false; // no ring: Enter belongs to the focused button
+            // No ring, or focus moved on to a button (Tab, a click): Enter belongs to the focused button.
+            if (at < 0 || ActiveControl is { } focused && focused != _list) return false;
             if (!rows[at].Account.Active) SwitchRequested?.Invoke(rows[at].Account);
             return true;
         }
@@ -148,7 +149,7 @@ public sealed class DashboardForm : Form
     void SetRing(List<AccountRow> rows, int index)
     {
         for (var i = 0; i < rows.Count; i++) rows[i].Ring = i == index;
-        _ringEmail = rows[index].Account.Email;
+        _ring = rows[index].Account.Number;
         ActiveControl = _list; // off any button, so Enter is the ring's
         _list.ScrollControlIntoView(rows[index]);
     }
@@ -221,7 +222,9 @@ public sealed class DashboardForm : Form
         ShowStatus();
         var best = snap == null ? null : Summary.Best(snap.Accounts);
         _best.Enabled = best != null;
-        _tips.SetToolTip(_best, best != null ? $"Use the account with the most room ({best.ShortName})" : "Already on the account with the most room");
+        _tips.SetToolTip(_best, best != null ? $"Use the account with the most room ({best.ShortName})"
+            : snap?.Accounts.FirstOrDefault(a => a.Active) is { Usage: not null } ? "Already on the account with the most room"
+            : "The current account's usage is unknown");
         _best.Invalidate();
         // A refresh that changes nothing shown is no rebuild: tearing every row down and back up is what flickers.
         var shown = Fingerprint(snap, error, projects, sessions, line, _allSessions);
@@ -247,8 +250,8 @@ public sealed class DashboardForm : Form
             row.MenuAction += (x, act) => AccountAction?.Invoke(x, act);
             row.ExpandRequested += ToggleRow;
             row.SizeChanged += (_, _) => FitHeight();
-            if (a.Email == _expandedEmail) row.SetExpanded(true, animate: false);
-            row.Ring = a.Email == _ringEmail;
+            if (a.Number == _expanded) row.SetExpanded(true, animate: false);
+            row.Ring = a.Number == _ring;
             _list.Controls.Add(row);
         }
         AddSessions(snap, sessions, now);
@@ -283,7 +286,7 @@ public sealed class DashboardForm : Form
         Account? Of(int? n) => n is { } k ? snap?.Accounts.FirstOrDefault(a => a.Number == k) : null;
         foreach (var s in shown)
         {
-            var row = new SessionRow(s, Of(s.Account), Of(s.ContinueOn), now);
+            var row = new SessionRow(s, Of(s.Account), Of(s.ContinueOn), now, Of(s.Stop?.Account));
             row.TerminalClicked += x => SessionTerminalRequested?.Invoke(x);
             row.ContinueClicked += x => ContinueRequested?.Invoke(x);
             _list.Controls.Add(row);
@@ -312,7 +315,7 @@ public sealed class DashboardForm : Form
             snap = snap?.Accounts.Select(a => a with { UsageAgeSeconds = null, UsageFetchedAt = null }),
             error,
             projects,
-            sessions = sessions?.Select(s => new { s.Pid, s.SessionId, s.Cwd, s.Account, s.Status, s.StartedUtc, s.AtLimit, orphan = s.Stop?.Orphan, reset = s.Stop?.Limit?.ResetsAt, s.ContinueOn }),
+            sessions = sessions?.Select(s => new { s.Pid, s.SessionId, s.Cwd, s.Account, s.Status, s.StartedUtc, s.AtLimit, orphan = s.Stop?.Orphan, reset = s.Stop?.Limit?.ResetsAt, s.ContinueOn, stoppedOn = s.Stop?.Account }),
             line,
             allSessions,
             minute = DateTimeOffset.Now.ToString("yyyyMMddHHmm"),
@@ -324,7 +327,7 @@ public sealed class DashboardForm : Form
         var open = !row.Expanded;
         foreach (var r in _list.Controls.OfType<AccountRow>()) if (r != row && r.Expanded) r.SetExpanded(false);
         row.SetExpanded(open);
-        _expandedEmail = open ? row.Account.Email : null;
+        _expanded = open ? row.Account.Number : null;
     }
 
     /// Small muted caps above a group of rows.
@@ -429,6 +432,16 @@ public sealed class DashboardForm : Form
         base.OnPaint(e);
         using var pen = new Pen(Palette.Current.IsDark ? Color.FromArgb(56, 56, 56) : Color.FromArgb(220, 220, 220));
         e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+    }
+
+    /// Hidden, the flyout forgets its keyboard ring and the expanded "+N more": each opening starts as the defaults.
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (Visible) return;
+        _ring = null;
+        foreach (var r in Rows()) r.Ring = false;
+        _allSessions = false;
     }
 
     protected override void OnHandleCreated(EventArgs e)

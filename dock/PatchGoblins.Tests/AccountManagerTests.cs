@@ -78,6 +78,23 @@ public class SummaryTests
     }
 
     [Fact]
+    public void PaceWarnsWhenTheWeekWillNotLastAndNoTimeIsAhead()
+    {
+        // Used up: the engine puts the exhaustion time at its reading, already past.
+        Assert.Equal(("weekly used up", true), Summary.Pace(A(1, 0, 0, sevenDay: new(100, Now.AddDays(1), AheadOfPace: false, WillLastToReset: false, ProjectedExhaustionAt: Now.AddHours(-1))), Now));
+        Assert.Equal(("weekly runs short", true), Summary.Pace(A(1, 0, 0, sevenDay: new(90, Now.AddDays(1), AheadOfPace: true, WillLastToReset: false, ProjectedExhaustionAt: Now.AddHours(-1))), Now));
+    }
+
+    [Fact]
+    public void AnAccountWithNoReadingIsUnknownNotAtItsLimit()
+    {
+        var unread = new Account(2, "b@example.com", false, "unavailable", null);
+        Assert.Equal("1 account, usage unknown", Summary.Header(new Snapshot(1, 2, [unread with { Active = true }]), 95, Now));
+        Assert.StartsWith("1 of 2 accounts have room · 1 unknown", Summary.Header(new Snapshot(1, 1, [A(1, 10, 10, active: true), unread]), 95, Now));
+        Assert.StartsWith("1 of 2 have room · 1 unknown", Summary.Tooltip(new Snapshot(1, 1, [A(1, 10, 10, active: true), unread]), auto: false));
+    }
+
+    [Fact]
     public void TooltipListsEveryAccountWithinWindowsLimit()
     {
         var snap = new Snapshot(1, 2, [A(1, 34, 58), A(2, 92, 71, active: true, alias: "work"), A(3, 5, 12)]);
@@ -116,10 +133,12 @@ public class SummaryTests
     [Fact]
     public void SwitchedTextKeepsTheEngineWarnings()
     {
+        // The warning first: the toast shows about three lines, and the lead line must never push it out of view.
         var text = Summary.SwitchedText("work", ["Account-2 is in use by a pinned terminal"]);
-        Assert.StartsWith("Nothing running is interrupted.", text);
-        Assert.EndsWith("\nAccount-2 is in use by a pinned terminal", text);
-        Assert.DoesNotContain("\n", Summary.SwitchedText("work", null));
+        Assert.StartsWith("Account-2 is in use by a pinned terminal\n", text);
+        var lead = Summary.SwitchedText("work", null);
+        Assert.DoesNotContain("\n", lead);
+        Assert.True(lead.Length <= 80, lead);
     }
 
     [Fact]
@@ -224,14 +243,29 @@ public class ContinueOnTests
     public void ContinuesOnTheAccountWithMostRoomButNeverItsOwn()
     {
         var accounts = new List<Account> { A(1, 30, active: true), A(2, 100), A(3, 10), A(4, 5, disabled: true) };
-        Assert.Equal(3, ContinueOn.Target(Stop(2), accounts, _ => true, Now));
+        Assert.Equal(3, ContinueOn.Target(Stop(2), accounts, Dir, Free, Now));
         // Its own account has room again: still another one, since a second window on its transcript would collide.
-        Assert.Equal(1, ContinueOn.Target(Stop(3), accounts, _ => true, Now));
-        // No profile to resume in: only the default login's account qualifies.
-        Assert.Equal(1, ContinueOn.Target(Stop(2), accounts, n => false, Now));
+        Assert.Equal(1, ContinueOn.Target(Stop(3), accounts, Dir, Free, Now));
         // Refused until its reset, whatever the reading says.
-        Assert.Equal(1, ContinueOn.Target(Stop(2), accounts, _ => true, Now, refusedUntil: new Dictionary<int, DateTimeOffset> { [3] = Now.AddHours(1) }));
-        Assert.Null(ContinueOn.Target(Stop(1), [A(1, 100, active: true), A(2, 100)], _ => true, Now)); // nowhere has room
+        Assert.Equal(1, ContinueOn.Target(Stop(2), accounts, Dir, Free, Now, refusedUntil: new Dictionary<int, DateTimeOffset> { [3] = Now.AddHours(1) }));
+        Assert.Null(ContinueOn.Target(Stop(1), [A(1, 100, active: true), A(2, 100)], Dir, Free, Now)); // nowhere has room
+    }
+
+    static string Dir(int n) => $@"C:\profiles\{n}";
+    static bool Free(string dir) => false;
+
+    [Fact]
+    public void NeverContinuesWhereTheStoppedWindowOrAnotherOnItsSessionLives()
+    {
+        var accounts = new List<Account> { A(1, 30, active: true), A(2, 100), A(3, 10) };
+        // The stop's account was recorded as 2 (the login it had), but the login moved to 1, whose folder is the stop's own:
+        // resuming there would run the session twice in one folder. 3 has a folder of its own.
+        var inDefault = Stop(2) with { ConfigDir = @"C:\cfg" };
+        Assert.Equal(3, ContinueOn.Target(inDefault, accounts, n => n == 1 ? @"C:\CFG\" : Dir(n), Free, Now));
+        // A live claude on the session in 3's folder (a window continued there before): nowhere left.
+        Assert.Null(ContinueOn.Target(inDefault, accounts, n => n == 1 ? @"C:\cfg" : Dir(n), d => d == Dir(3), Now));
+        // An account no folder can be named for is no target.
+        Assert.Equal(1, ContinueOn.Target(Stop(2), accounts, n => n == 3 ? null : Dir(n), Free, Now));
     }
 
     [Fact]
@@ -245,5 +279,15 @@ public class ContinueOnTests
     public void TheActiveAccountResumesInTheDefaultLoginsFolder()
     {
         Assert.Equal(ResumeStopped.DefaultDir, ContinueOn.DirFor(1, [A(1, 10, active: true)]));
+        Assert.Null(ContinueOn.DirFor(9, [A(1, 10, active: true)]));
+    }
+
+    [Fact]
+    public void AnAccountWithoutAProfileResumesWhereCswapRunCreatesIt()
+    {
+        // As the engine's slugify_email: ASCII letters, digits and `._-` kept, anything else one `_` per character.
+        var a = new Account(7, "jo+dev@exämple.com", false, "ok", null);
+        Assert.Equal("7-jo_dev_ex_mple.com", Path.GetFileName(ResumeStopped.NewProfileDir(a)));
+        Assert.Equal("sessions", Path.GetFileName(Path.GetDirectoryName(ResumeStopped.NewProfileDir(a))));
     }
 }

@@ -195,7 +195,7 @@ public class LimitWatchTests
         var rig = new Rig(A(1, 50, active: true), A(2, 5)) { Live = [2] };
         var o = await rig.Hit(Now, Now.AddHours(1));
         Assert.Equal([2], rig.Switched); // a window at its limit moves to any account with room
-        Assert.True(o is { Held: false, NoRoom: false });
+        Assert.True(o is { Error: null, NoRoom: false });
     }
 
     [Fact]
@@ -655,7 +655,7 @@ public class LimitWatchTests
     {
         var rig = new Rig(false, A(1, 50, active: true), A(2, 5)) { Live = [2] };
         var o = await rig.Hit(Now, Now.AddHours(1));
-        Assert.True(o!.Held);
+        Assert.Equal(LimitSwitch.HeldText, o!.Error);
         Assert.Empty(rig.Switched);
     }
 

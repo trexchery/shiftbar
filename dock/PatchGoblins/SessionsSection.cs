@@ -67,7 +67,9 @@ public sealed class SessionRow : Control
     public LiveSession Session => _s;
     internal Pill? ContinueButton => _continue;
 
-    public SessionRow(LiveSession s, Account? account, Account? continueOn, DateTimeOffset now)
+    /// `account`: the one it runs as; `stoppedOn`: the one whose limit stopped it (a default-login window's is the login it
+    /// had then, not the one it runs as after a switch).
+    public SessionRow(LiveSession s, Account? account, Account? continueOn, DateTimeOffset now, Account? stoppedOn = null)
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         _s = s;
@@ -76,10 +78,11 @@ public sealed class SessionRow : Control
         Margin = new Padding(0, 0, 0, Ui.S(2));
         var pal = Palette.Current;
         _folder = Sessions.ShortFolder(s.Cwd, StoreSecurity.UserProfile);
-        var who = account != null ? Summary.Name(account) : s.Account is { } n ? $"#{n}" : "default login";
+        var named = s.AtLimit ? stoppedOn : account;
+        var who = named != null ? Summary.Name(named) : (s.AtLimit ? s.Stop!.Account : s.Account) is { } n ? $"#{n}" : "default login";
         // A stop says when it resets; its age would read as part of that, so only the others show one.
         _meta = $"{who} · {Sessions.State(s, now)}" + (s.AtLimit ? "" : $" · {Sessions.Age(now.UtcDateTime - s.StartedUtc)}");
-        _dot = account?.ShownUsage != null ? pal.Meter(ResumeStopped.Peak(account)) : pal.Faint;
+        _dot = named?.ShownUsage != null ? pal.Meter(ResumeStopped.Peak(named)) : pal.Faint;
         _tip.SetToolTip(this, s.Cwd);
 
         _terminal = new Pill("", PillStyle.Icon, Ui.Terminal) { BackColor = pal.Back };

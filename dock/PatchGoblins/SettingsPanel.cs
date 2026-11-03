@@ -41,7 +41,7 @@ public sealed class SettingsPanel : UserControl
         Row("Quota notifications", "Near, at or past a limit", QuotaNotify, Ui.S(34));
 
         Section("Upkeep");
-        Row("Auto-switch near limit", "Claude accounts only", AutoSwitch, Ui.S(34));
+        Row("Auto-switch near limit", "Moves the default login near a limit", AutoSwitch, Ui.S(34));
         Row("Automatic switch line", "Earlier on a busy account, later on a quiet one", AutoLine, Ui.S(34));
         Row("Switch at", "When automatic is off", Threshold, Ui.S(72), "%");
         Row("Random switch delay", "0 = at once; a random wait up to this many seconds", SwitchBuffer, Ui.S(72), "s");

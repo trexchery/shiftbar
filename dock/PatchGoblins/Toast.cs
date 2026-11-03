@@ -3,7 +3,8 @@ namespace PatchGoblins;
 /// Patch Goblins' notice: a small rounded card at the bottom right of the screen, in place of Windows' balloon. It never
 /// takes focus, rises in, stays while hovered, fades out after a few seconds, and opens the flyout when clicked.
 /// Several stack upward; at most three at a time, the oldest going first. An optional action adds one primary button:
-/// clicking it (or Enter/Space once it has focus) runs the action and dismisses the card.
+/// clicking it runs the action and dismisses the card. The card never takes focus, so every action must also be reachable
+/// from the keyboard in the flyout (a stopped session's Continue on, an account row's Switch).
 public sealed class Toast : Form
 {
     static readonly List<Toast> Open = [];
@@ -92,7 +93,7 @@ public sealed class Toast : Form
     {
         var now = Environment.TickCount64;
         var hovered = Bounds.Contains(Cursor.Position);
-        if (hovered || ActionButton?.Focused == true) { _shownAt = now; _fadeFrom = -1; }
+        if (hovered) { _shownAt = now; _fadeFrom = -1; }
         if (_fadeFrom < 0 && now - _shownAt > (ActionButton != null ? ActionLifeMs : LifeMs)) _fadeFrom = now;
         Opacity = _fadeFrom >= 0 ? 1 - Math.Min(1, (now - _fadeFrom) / (double)FadeMs) : Math.Min(1, (now - _shownAt) / (double)FadeMs);
         if (_fadeFrom >= 0 && Opacity <= 0) Close();

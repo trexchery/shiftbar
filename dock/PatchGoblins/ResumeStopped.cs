@@ -586,12 +586,31 @@ public static class ResumeStopped
     {
         try
         {
-            // A limit seen only in a subagent file leaves the main transcript without one: it must just be as quiet as at the scan.
-            if (s.AtLimit && s.Limit is { } limit && LimitOf(Tail(s.Transcript)) is { } now ? now.At != limit.At : File.GetLastWriteTimeUtc(s.Transcript) != s.Seen) return false;
+            if (!AsScanned(s)) return false;
             if (s.Record == null) return true;
             using var doc = JsonDocument.Parse(File.ReadAllText(s.Record));
             var r = doc.RootElement;
             return s.Movable && Str(r, "status") == s.Status && Str(r, "sessionId") == s.SessionId && IsLiveClaude(s.Pid, Str(r, "procStart"), kill: true);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return false; }
+    }
+
+    /// The transcript is as the scan saw it: a stop at a limit still ends at that same error (nobody typed since), anything
+    /// else is untouched. A limit seen only in a subagent file leaves the main transcript without one: it must just be as quiet.
+    static bool AsScanned(StoppedSession s) =>
+        s.AtLimit && s.Limit is { } limit && LimitOf(Tail(s.Transcript)) is { } now ? now.At == limit.At : File.GetLastWriteTimeUtc(s.Transcript) == s.Seen;
+
+    /// Whether a stop at a limit still stands right before something acts on it: the error is still the transcript's last
+    /// word and the claude that wrote the record still runs it. Unlike `Unchanged`, a busy stop counts: nothing is closed.
+    public static bool StillStopped(StoppedSession s)
+    {
+        try
+        {
+            if (!AsScanned(s)) return false;
+            if (s.Record == null) return true;
+            using var doc = JsonDocument.Parse(File.ReadAllText(s.Record));
+            var r = doc.RootElement;
+            return Str(r, "sessionId") == s.SessionId && IsLiveClaude(s.Pid, Str(r, "procStart"), kill: true);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return false; }
     }
@@ -664,11 +683,21 @@ public static class ResumeStopped
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
     }
 
+    /// Where `cswap run N` keeps the profile it creates on its first run, as the engine's `session_dir_for` names it
+    /// (`N-<email>`, every character but ASCII letters, digits and `._-` as `_`).
+    public static string NewProfileDir(Account a) =>
+        Path.Combine(ProfilesDir, $"{a.Number}-" + string.Concat(a.Email.Normalize(NormalizationForm.FormC).EnumerateRunes()
+            .Select(r => r.IsAscii && (Rune.IsLetterOrDigit(r) || r.Value is '.' or '_' or '-') ? r.ToString() : "_")));
+
+    /// One folder, however the two paths are spelled.
+    public static bool SameDir(string a, string b) =>
+        Path.GetFullPath(a).TrimEnd('\\', '/').Equals(Path.GetFullPath(b).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+
     /// Copies the transcript (and its subagents/tool-results folder), file checkpoints and todos into
     /// `targetDir`, where `--resume` finds them.
     public static void CopyTranscript(StoppedSession s, string targetDir)
     {
-        if (Path.GetFullPath(targetDir).TrimEnd('\\').Equals(Path.GetFullPath(s.ConfigDir).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return;
+        if (SameDir(targetDir, s.ConfigDir)) return;
         var project = Path.GetFileName(Path.GetDirectoryName(s.Transcript)!);
         var dest = Path.Combine(targetDir, "projects", project);
         Directory.CreateDirectory(dest);
@@ -835,20 +864,24 @@ public static class ResumeStopped
 
     /// Whether another live, reachable claude holds the same session (resumed by hand after the terminal died): reopening
     /// the orphan then would run the session twice.
-    internal static bool HasLiveTwin(StoppedSession s)
+    internal static bool HasLiveTwin(StoppedSession s) => ConfigDirs(null).Any(d => Holds(d.Dir, s.SessionId, except: s.Pid, reachable: true));
+
+    /// Whether a live claude in `dir` runs `sessionId` (orphaned or not): a window resumed there would share its transcript.
+    public static bool HoldsSession(string dir, string sessionId) => Holds(dir, sessionId, except: 0, reachable: false);
+
+    static bool Holds(string dir, string sessionId, int except, bool reachable)
     {
-        foreach (var (dir, _) in ConfigDirs(null))
-            try
+        try
+        {
+            foreach (var rec in Directory.GetFiles(Path.Combine(dir, "sessions"), "*.json"))
             {
-                foreach (var rec in Directory.GetFiles(Path.Combine(dir, "sessions"), "*.json"))
-                {
-                    using var doc = JsonDocument.Parse(File.ReadAllText(rec));
-                    var r = doc.RootElement;
-                    if (Str(r, "sessionId") == s.SessionId && r.TryGetProperty("pid", out var p) && p.GetInt32() is var pid && pid != s.Pid
-                        && IsLiveClaude(pid, Str(r, "procStart"), kill: true) && !Orphaned(pid)) return true;
-                }
+                using var doc = JsonDocument.Parse(File.ReadAllText(rec));
+                var r = doc.RootElement;
+                if (Str(r, "sessionId") == sessionId && r.TryGetProperty("pid", out var p) && p.GetInt32() is var pid && pid != except
+                    && IsLiveClaude(pid, Str(r, "procStart"), kill: true) && !(reachable && Orphaned(pid))) return true;
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { }
         return false;
     }
 

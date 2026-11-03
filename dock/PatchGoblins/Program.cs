@@ -5,6 +5,14 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // Only `--minimized` starts the tray. Anything else is a caller of a retired verb (an older build's `guard` hook or
+        // `agents-mcp` server in a still-running claude): refuse it, exit 2 so a hook blocks the tool call, and never start a tray under it.
+        if (args.Any(a => a != "--minimized"))
+        {
+            Console.Error.WriteLine($"patch-goblins: '{args.First(a => a != "--minimized")}' is not supported by this version.");
+            Environment.ExitCode = 2;
+            return;
+        }
         var isolated = DockSettings.Env("DATA") is { Length: > 0 } ? "-" + DirKey(DockSettings.Dir) : "";
         using var mutex = new Mutex(true, @"Local\PatchGoblins-" + Environment.UserName + isolated, out var first);
         if (!first) return; // already running in the tray
