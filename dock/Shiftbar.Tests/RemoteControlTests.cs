@@ -204,6 +204,15 @@ public class InputBoxTests
     }
 
     [Fact]
+    public void TypedCommandAfterANoBreakSpaceIsRead()
+    {
+        // Claude Code 2.1.317+ once the box holds text: "❯" + U+00A0, with the autocomplete list above the box.
+        var b = Parse(["  ❯ /remote-control      Control this session from your phone", Rule(), "❯ /remote-control", Rule(), "  ⏵⏵ auto mode on"], W, typed: true);
+        Assert.Equal(BoxState.Text, b.State);
+        Assert.Equal(ConsoleNudge.Command, b.Text);
+    }
+
+    [Fact]
     public void APlaceholderIsTextUnlessItsAttributesProveIt()
     {
         var row = "> Try \"refactor <filepath>\"".PadRight(W);
