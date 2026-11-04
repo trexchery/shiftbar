@@ -170,6 +170,16 @@ def test_terminal_command_quotes_paths_and_never_uses_shell(monkeypatch, tmp_pat
     opened.assert_called_once_with(["/usr/bin/open", "-a", "Terminal", str(script)], check=True)
 
 
+def test_terminal_script_of_an_isolated_instance_stays_in_its_data_folder(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setenv("SHIFTBAR_DATA", str(tmp_path / "iso"))
+    with patch("claude_swap.shiftbar_mac.subprocess.run"):
+        script = shiftbar_mac.run_terminal(["/app/Shiftbar", "--engine", "list"])
+    assert script.parent == tmp_path / "iso" / "terminal"
+    assert not (tmp_path / "home").exists()
+
+
 def test_macos_enrollment_reads_keychain_profile_without_plaintext_seed(tmp_path):
     from claude_swap.enroll import build_envelope
     (tmp_path / ".claude.json").write_text(json.dumps({"oauthAccount": {"emailAddress": "synthetic@example.com"}}))
@@ -293,6 +303,19 @@ def test_migration_merges_into_existing_folder_and_keeps_login_off(monkeypatch, 
     assert (new / "auto-prime" / "ledger.json").is_file()
     assert (old / "settings.json").is_file()  # the clash stays behind, untouched
     assert not (tmp_path / "Library" / "LaunchAgents").exists()  # launch at login was off: it stays off
+
+
+def test_migration_leaves_the_retired_agents_folder_where_git_knows_it(monkeypatch, tmp_path):
+    _clear_data_env(monkeypatch)
+    old = _old_install(tmp_path, agent=None)
+    (old / "agents" / "repo-1").mkdir(parents=True)
+    shiftbar_mac.migrate_from_patch_goblins(tmp_path, running=lambda _: False)
+    new = tmp_path / "Library" / "Application Support" / "shiftbar"
+    assert (new / "settings.json").is_file()
+    assert not (new / "agents").exists()
+    assert (old / "agents" / "repo-1").is_dir()
+    # Only the agents folder left: nothing to carry over, the old app is not even asked about.
+    shiftbar_mac.migrate_from_patch_goblins(tmp_path, running=lambda _: pytest.fail("nothing left to migrate"))
 
 
 def test_migration_refuses_while_patch_goblins_runs(monkeypatch, tmp_path):
