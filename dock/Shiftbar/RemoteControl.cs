@@ -91,12 +91,14 @@ public static class RemoteControl
         return File.Exists(legacy) && new FileInfo(legacy).Length > 0 ? legacy : Path.Combine(StoreSecurity.UserProfile, ".claude.json");
     }
 
-    /// Why a window must not be typed into now, or null when it may: its record says idle, its files have been quiet for
-    /// `Quiet`, its last message is a finished reply, and (unless the user asked, `manual`) nobody has touched the keyboard or
-    /// mouse for `Away`. `sinceInput` null: unknown, which is not away.
+    /// Why a window must not be typed into now, or null when it may: its record says idle (or "busy"/"shell" with the
+    /// transcript at a finished reply: a window running workflows or a background command keeps that status until they
+    /// settle, and its prompt still takes `/remote-control`), its transcript has been quiet for `Quiet`, its last message is
+    /// a finished reply, and (unless the user asked, `manual`) nobody has touched the keyboard or mouse for `Away`.
+    /// `sinceInput` null: unknown, which is not away.
     public static string? Gate(DateTime nowUtc, DateTime lastWriteUtc, bool endsTurn, string? status, TimeSpan? sinceInput, bool manual)
     {
-        if (status != "idle") return "busy";
+        if (status is not ("idle" or "busy" or "shell") || status != "idle" && !endsTurn) return "busy";
         if (nowUtc - lastWriteUtc < Quiet) return "recent-activity";
         if (!endsTurn) return "mid-turn";
         if (!manual && !(sinceInput >= Away)) return "user-active";
@@ -104,7 +106,7 @@ public static class RemoteControl
     }
 
     /// `Gate` for a live default-login window, read from disk now: its session record (same pid and session, the same
-    /// process), its transcript and session folder, and the user's last input.
+    /// process), its transcript, and the user's last input.
     public static string? Ready(string configDir, int pid, string sessionId, bool manual)
     {
         try
@@ -116,7 +118,8 @@ public static class RemoteControl
                 if (!r.TryGetProperty("pid", out var p) || !p.TryGetInt32(out var id) || id != pid || Str(r, "sessionId") != sessionId) continue;
                 if (!ResumeStopped.IsLiveClaude(pid, Str(r, "procStart"), kill: true)) return "not-live";
                 if (Str(r, "cwd") is not { } cwd || ResumeStopped.TranscriptOf(configDir, sessionId, cwd) is not { } t) return "no-transcript";
-                return Gate(DateTime.UtcNow, ResumeStopped.Activity(t, sessionId), ResumeStopped.EndsTurn(ResumeStopped.Tail(t)), Str(r, "status"), SinceInput(), manual);
+                // The transcript's own write time, not the session folder's: a running workflow writes there all the time.
+                return Gate(DateTime.UtcNow, File.GetLastWriteTimeUtc(t), ResumeStopped.EndsTurn(ResumeStopped.Tail(t)), Str(r, "status"), SinceInput(), manual);
             }
             return "no-session";
         }
@@ -169,6 +172,8 @@ public sealed class RcReconnect
         public int Switch { get; } = switchId;
         public bool Sent { get; internal set; }
         public int Tries { get; internal set; }
+        /// The gate's last reason for not typing yet, so the log shows each change once.
+        public string? Why { get; set; }
         public DateTime NotBefore { get; internal set; }
         public DateTime SentAt { get; internal set; }
         public DateTime GiveUpAt { get; internal set; }
@@ -331,7 +336,13 @@ public sealed partial class TrayApp
                         _rc.Later(e, DateTime.UtcNow);
                         break;
                     case RcReconnect.Step.Nudge:
-                        if (await Task.Run(() => RemoteControl.Ready(ResumeStopped.DefaultDir, e.Pid, e.SessionId, manual: false)) != null) { _rc.Later(e, DateTime.UtcNow); break; }
+                        if (await Task.Run(() => RemoteControl.Ready(ResumeStopped.DefaultDir, e.Pid, e.SessionId, manual: false)) is { } why)
+                        {
+                            if (e.Why != why) Program.Log($"remote control: {e.SessionId} waiting ({why})");
+                            e.Why = why;
+                            _rc.Later(e, DateTime.UtcNow);
+                            break;
+                        }
                         var result = await ConsoleNudge.RunAsync(Environment.ProcessPath!, e.Pid, e.SessionId, manual: false);
                         Program.Log($"remote control: {e.SessionId} {result}");
                         if (_rc.Report(e, result, DateTime.UtcNow) == RcReconnect.Step.GiveUp) RcDropped(e, left: true);

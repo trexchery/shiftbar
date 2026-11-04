@@ -101,7 +101,9 @@ public class RemoteControlTests
         var quiet = Now.AddSeconds(-11);
         var away = TimeSpan.FromSeconds(31);
         Assert.Null(RemoteControl.Gate(Now, quiet, endsTurn: true, "idle", away, manual: false));
-        Assert.Equal("busy", RemoteControl.Gate(Now, quiet, true, "busy", away, false));
+        Assert.Equal("busy", RemoteControl.Gate(Now, quiet, false, "busy", away, false)); // still working
+        Assert.Null(RemoteControl.Gate(Now, quiet, true, "busy", away, false)); // a finished reply, workflows still running: the record stays busy
+        Assert.Null(RemoteControl.Gate(Now, quiet, true, "shell", away, false)); // a background command still running
         Assert.Equal("busy", RemoteControl.Gate(Now, quiet, true, "waiting", away, false)); // a permission prompt
         Assert.Equal("busy", RemoteControl.Gate(Now, quiet, true, null, away, false));
         Assert.Equal("recent-activity", RemoteControl.Gate(Now, Now.AddSeconds(-9), true, "idle", away, false));
@@ -110,6 +112,26 @@ public class RemoteControlTests
         Assert.Equal("user-active", RemoteControl.Gate(Now, quiet, true, "idle", null, false)); // unknown is not away
         Assert.Null(RemoteControl.Gate(Now, quiet, true, "idle", TimeSpan.Zero, manual: true)); // the toast's button: the user asked
         Assert.Equal("mid-turn", RemoteControl.Gate(Now, quiet, false, "idle", null, manual: true)); // but never mid-turn
+    }
+
+    [Fact]
+    public void AFinishedWindowWhoseRecordStaysBusyWhileWorkflowsRunIsReady()
+    {
+        using var dir = new TempDir();
+        Directory.CreateDirectory(Path.Combine(dir.Path, "sessions"));
+        using var self = Process.GetCurrentProcess();
+        var stamp = self.StartTime.ToUniversalTime().ToFileTimeUtc();
+        File.WriteAllText(Path.Combine(dir.Path, "sessions", "1.json"),
+            $$"""{"pid":{{self.Id}},"sessionId":"s1","cwd":"C:\\w","status":"busy","kind":"interactive","procStart":"{{stamp}}"}""");
+        var projects = Path.Combine(dir.Path, "projects", "C--w");
+        Directory.CreateDirectory(Path.Combine(projects, "s1", "workflows"));
+        var transcript = Path.Combine(projects, "s1.jsonl");
+        void Write(string last) { File.WriteAllLines(transcript, [Typed, last]); File.SetLastWriteTimeUtc(transcript, DateTime.UtcNow.AddSeconds(-60)); }
+        File.WriteAllText(Path.Combine(projects, "s1", "workflows", "agent-a.jsonl"), "{}"); // a workflow agent writing right now
+        Write(Done);
+        Assert.Null(RemoteControl.Ready(dir.Path, self.Id, "s1", manual: true));
+        Write("""{"type":"user","message":{"role":"user","content":"[task-notification]"}}"""); // a turn started: not finished
+        Assert.Equal("busy", RemoteControl.Ready(dir.Path, self.Id, "s1", manual: true));
     }
 
     [Fact]
