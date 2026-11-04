@@ -79,12 +79,13 @@ public static class ConsoleNudge
         return cells.Count > 0 && cells.All(i => (attrs[i] & 0xFF) == 0x08);
     }
 
-    /// Where a prompt line's marker is ('>' or '❯' after at most two spaces, then a space or nothing), else -1.
+    /// Where a prompt line's marker is ('>' or '❯' after at most two spaces, then a space or nothing), else -1. Claude Code
+    /// 2.1.317+ draws a no-break space (U+00A0) after the marker once the box holds text, a plain space while it is empty.
     static int MarkerAt(string row)
     {
         var i = 0;
         while (i < row.Length && i < 2 && row[i] == ' ') i++;
-        return i < row.Length && (row[i] is '>' or '❯') && (i + 1 == row.Length || row[i + 1] == ' ') ? i : -1;
+        return i < row.Length && (row[i] is '>' or '❯') && (i + 1 == row.Length || row[i + 1] is ' ' or ' ') ? i : -1;
     }
 
     /// A full-width '─' rule. Claude Code 2.1.317 labels the box's top rule near its right end ("───…─── auto-mode ─"), so a
