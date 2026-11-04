@@ -85,7 +85,7 @@ public static class ConsoleNudge
     {
         var i = 0;
         while (i < row.Length && i < 2 && row[i] == ' ') i++;
-        return i < row.Length && (row[i] is '>' or '❯') && (i + 1 == row.Length || row[i + 1] is ' ' or ' ') ? i : -1;
+        return i < row.Length && (row[i] is '>' or '❯') && (i + 1 == row.Length || row[i + 1] is ' ' or '\u00A0') ? i : -1;
     }
 
     /// A full-width '─' rule. Claude Code 2.1.317 labels the box's top rule near its right end ("───…─── auto-mode ─"), so a
