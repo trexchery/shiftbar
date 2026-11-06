@@ -8,9 +8,14 @@ public class SwitchNowArgsTests
 {
     [Fact]
     public void MacOSKeepsTheExclusiveRefusalOfAHeldAccount() =>
-        Assert.Equal(["switch", "3", "--json", "--exclusive"], Engine.SwitchNowArgs(3, macOS: true));
+        Assert.Equal(["switch", "3", "--json", "--auto", "--exclusive"], Engine.SwitchNowArgs(3, macOS: true));
 
     [Fact]
     public void WindowsSwitchesOntoAHeldAccount() =>
-        Assert.Equal(["switch", "3", "--json"], Engine.SwitchNowArgs(3, macOS: false));
+        Assert.Equal(["switch", "3", "--json", "--auto"], Engine.SwitchNowArgs(3, macOS: false));
+
+    /// The automatic check never runs consume-first, whatever the saved strategy: it moved a login that still had room.
+    [Fact]
+    public void AutoCheckIsAlwaysBest() =>
+        Assert.Equal(["auto", "--once", "--json", "--strategy", "best", "--threshold", "92.5"], Engine.AutoOnceArgs(92.5));
 }

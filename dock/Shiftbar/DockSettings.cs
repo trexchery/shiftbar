@@ -18,9 +18,8 @@ public sealed class DockSettings
     public bool AutoProjectAccount { get; set; }
     public bool QuotaNotifications { get; set; }
     public bool AutoPrime { get; set; }
-    public bool AutoLine { get; set; } = true; // the switch line follows each account's burn (SwitchLine); off: the engine's fixed threshold
     public string? TerminalFolder { get; set; } // where "Open terminal" starts browsing; null: the user folder
-    // Keys an older settings.json may still hold (Agent*, AskApproval, MoveWorkflows*) are ignored on load and dropped on the next save.
+    // Keys an older settings.json may still hold (Agent*, AskApproval, MoveWorkflows*, AutoLine) are ignored on load and dropped on the next save.
 
     public const int MinRefreshSeconds = 60;
 

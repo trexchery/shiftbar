@@ -4,11 +4,10 @@ namespace Shiftbar;
 /// in place of the account list. The search box keeps only the rows whose name, hint or section match every word.
 public sealed class SettingsPanel : UserControl
 {
-    public readonly NumericUpDown Threshold = new() { Minimum = 50, Maximum = 99, Value = 90 };
     public readonly NumericUpDown SwitchBuffer = new() { Minimum = 0, Maximum = 300, Value = 0 };
     public readonly TextBox TerminalFolder = new() { PlaceholderText = "your user folder" };
     public readonly Toggle Startup = new("");
-    public readonly Toggle AutoSwitch = new(""), AutoProject = new(""), QuotaNotify = new(""), AutoPrime = new(""), AutoLine = new(""), ReconnectRc = new("");
+    public readonly Toggle AutoSwitch = new(""), AutoProject = new(""), QuotaNotify = new(""), AutoPrime = new(""), ReconnectRc = new("");
     public readonly TextBox Search = new() { PlaceholderText = "Search settings" };
 
     public event Action? SaveClicked, CancelClicked;
@@ -42,9 +41,7 @@ public sealed class SettingsPanel : UserControl
         Row("Reconnect Remote Control", "In idle windows a login change dropped it in", ReconnectRc, Ui.S(34));
 
         Section("Upkeep");
-        Row("Auto-switch near limit", "Moves the default login near a limit", AutoSwitch, Ui.S(34));
-        Row("Automatic switch line", "Earlier on a busy account, later on a quiet one", AutoLine, Ui.S(34));
-        Row("Switch at", "When automatic is off", Threshold, Ui.S(72), "%");
+        Row("Auto-switch near limit", "Earlier on a busy account; one you pick stays until it runs out", AutoSwitch, Ui.S(34));
         Row("Random switch delay", "0 = at once; a random wait up to this many seconds", SwitchBuffer, Ui.S(72), "s");
         Row("Auto-Prime", "Start 5-hour windows early", AutoPrime, Ui.S(34));
 

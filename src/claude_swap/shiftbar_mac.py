@@ -371,10 +371,9 @@ class MenuExtension:
     def _desktop_settings(self, rumps):
         config = self.snapshot.get("config", {})
         menu = rumps.MenuItem("Settings")
-        for key, title in (("autoPrime", "Auto-Prime"), ("autoLine", "Adaptive switch threshold"),
-                           ("quotaNotifications", "Quota notifications"),
+        for key, title in (("autoPrime", "Auto-Prime"), ("quotaNotifications", "Quota notifications"),
                            ("preserveRemoteControl", "Restore Remote Control"), ("autoProjectAccount", "Prefer folder account")):
-            value = bool(config.get(key, key in ("autoLine", "preserveRemoteControl")))
+            value = bool(config.get(key, key == "preserveRemoteControl"))
             item = rumps.MenuItem(title, callback=lambda _, k=key, v=value: self._toggle_setting(k, not v, config))
             item.state = int(value)
             menu.add(item)

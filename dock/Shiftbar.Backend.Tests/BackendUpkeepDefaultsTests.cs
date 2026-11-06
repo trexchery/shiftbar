@@ -6,7 +6,7 @@ namespace Shiftbar.Tests;
 public sealed class BackendUpkeepDefaultsTests
 {
     [Fact]
-    public async Task DefaultsNeverInvokeEngineOrTouchSessionsAndSavedThresholdIsRespected()
+    public async Task DefaultsNeverInvokeEngineOrTouchSessionsAndTheLineIsAutomatic()
     {
         using var temp = new TempDir();
         var before = Environment.GetEnvironmentVariable("SHIFTBAR_DATA");
@@ -17,13 +17,13 @@ public sealed class BackendUpkeepDefaultsTests
         try
         {
             var engine = new Engine(Path.Combine(temp.Path, "must-never-run"));
-            var settings = new DockSettings { AutoLine = false };
+            var settings = new DockSettings();
             Snapshot current = new(1, 1, [Account(10)]);
             var notices = new List<string>();
             var refreshes = 0;
             using var upkeep = new BackendUpkeep(engine, settings, () => current, (_, text) => notices.Add(text), () => { refreshes++; return Task.CompletedTask; });
             upkeep.ApplyEngineConfig(new Dictionary<string, string?> { ["autoswitch.threshold"] = "83.5" });
-            Assert.Equal(83.5, upkeep.EffectiveThreshold);
+            Assert.Equal(SwitchLine.Unknown, upkeep.EffectiveThreshold); // no burn read yet; the saved 83.5 is only for no login at all
             await upkeep.TickAsync();
             current = current with { Accounts = [Account(100)] };
             await upkeep.TickAsync();

@@ -63,6 +63,9 @@ from claude_swap.usage_store import (
 
 STATE_FILENAME = "autoswitch_state.json"
 STATE_SCHEMA_VERSION = 1
+# The account the user last switched to by hand: ticks leave it only once it
+# runs out (at-limit), never proactively and never on a failover.
+MANUAL_PIN = "manualPin"
 
 _logger = logging.getLogger("claude-swap")
 
@@ -636,6 +639,48 @@ def _headroom_by_account(
     }
 
 
+def _state_lock(state_path: Path) -> FileLock:
+    return FileLock(state_path.parent / ".autoswitch_state.lock")
+
+
+def _load_state(state_path: Path) -> dict:
+    try:
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def switch_recorded(
+    switcher: ClaudeAccountSwitcher,
+    run: Callable[[], dict | None],
+    *,
+    manual: bool,
+    state_path: Path | None = None,
+) -> dict | None:
+    """Run a switch made outside a tick, under the lock a tick's switch takes.
+
+    ``manual``: the user picked the account, so ticks keep it until it runs
+    out. Otherwise (the tray's switch on a limit error) any earlier pin goes.
+    Serialized with ``_perform``, so a tick that decided before this switch
+    sees the active account changed and drops its own move.
+    """
+    path = state_path or (switcher.backup_dir / STATE_FILENAME)
+    with _state_lock(path):
+        before = switcher.current_account_number()
+        result = run()
+        after = switcher.current_account_number()
+        if after != before and after is not None:
+            state = _load_state(path)
+            state["schemaVersion"] = STATE_SCHEMA_VERSION
+            if manual:
+                state[MANUAL_PIN] = after
+            else:
+                state.pop(MANUAL_PIN, None)
+            atomic_write_json(path, state)
+    return result
+
+
 class AutoSwitchEngine:
     """Threshold-policy auto-switcher over a :class:`ClaudeAccountSwitcher`.
 
@@ -694,14 +739,10 @@ class AutoSwitchEngine:
     # -- state file ---------------------------------------------------------
 
     def _state_lock(self) -> FileLock:
-        return FileLock(self.state_path.parent / ".autoswitch_state.lock")
+        return _state_lock(self.state_path)
 
     def _read_state(self) -> dict:
-        try:
-            raw = json.loads(self.state_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            return {}
-        return raw if isinstance(raw, dict) else {}
+        return _load_state(self.state_path)
 
     def _mutate_state(self, mutator: Callable[[dict], None]) -> dict:
         """Read-modify-write the state file under its lock; returns new state.
@@ -1061,6 +1102,18 @@ class AutoSwitchEngine:
                 )
                 return TickOutcome.NO_ACTION
             trigger = "failover"
+
+        if trigger != "at-limit" and str(state.get(MANUAL_PIN)) == str(current):
+            self._emit(
+                NoSwitchEvent(
+                    reason="manual-pin",
+                    detail=(
+                        f"account {current} was chosen by hand; it moves once "
+                        "its 5-hour or weekly limit runs out"
+                    ),
+                )
+            )
+            return TickOutcome.NO_ACTION
 
         if trigger in ("proactive", "consume-first") and self._in_cooldown(state):
             self._emit(NoSwitchEvent(reason="cooldown"))
@@ -2191,6 +2244,17 @@ class AutoSwitchEngine:
             if trigger in ("proactive", "consume-first") and self._in_cooldown(state):
                 self._emit(NoSwitchEvent(reason="cooldown"))
                 return TickOutcome.NO_ACTION
+            # A switch outside the tick (by hand, or the tray's on a limit
+            # error) landed after this decision: it stands, ours is stale.
+            if (
+                decided_from is not None
+                and self.switcher.current_account_number() != decided_from
+            ):
+                self._emit(NoSwitchEvent(
+                    reason="decision-changed",
+                    detail="the active account changed; re-deciding next tick",
+                ))
+                return TickOutcome.NO_ACTION
 
             result = self.switcher.switch_to(number, json_output=True)
             if not result or not result.get("switched"):
@@ -2223,6 +2287,7 @@ class AutoSwitchEngine:
             # nulls then runs the wrong legs. Record it directly so the
             # reader never has to guess.
             state["leftTrigger"] = trigger
+            state.pop(MANUAL_PIN, None)  # an automatic move ends a hand-picked hold
             atomic_write_json(self.state_path, state)
 
         self._emit(

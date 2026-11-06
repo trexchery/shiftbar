@@ -30,7 +30,7 @@ Quit the old app first (its menu bar, **Quit**); Shiftbar refuses to start while
 
 ## Use
 
-Launch **Shiftbar** from Applications. The menu bar title shows the active account's usage. Its menu lists every account (click one to switch), with **Rotate to next**, **Switch to best**, **Next available**, add, remove, disable and enable, switch history, and the engine's own **Settings** (title, refresh interval, **Auto-switch accounts** and its threshold).
+Launch **Shiftbar** from Applications. The menu bar title shows the active account's usage. Its menu lists every account (click one to switch), with **Rotate to next**, **Switch to best**, **Next available**, add, remove, disable and enable, switch history, and the engine's own **Settings** (title, refresh interval, **Auto-switch accounts**).
 
 The **Shiftbar** submenu adds:
 
@@ -38,7 +38,7 @@ The **Shiftbar** submenu adds:
 - **Sign in another account…**: the official Claude Code login in an isolated profile, then the account is added.
 - **Prime fresh 5-hour windows** and **Auto-Prime status**: start fresh windows early with one tiny request, now or automatically.
 - **Account tools**: for each account, **Open terminal…** (Claude Code as that account, in a folder you pick), **Set alias…** and **Assign folder…**, plus removing and viewing folder mappings.
-- **Settings**: Auto-Prime, Adaptive switch threshold, Quota notifications, Restore Remote Control, Prefer folder account, and the folder terminals start in.
+- **Settings**: Auto-Prime, Quota notifications, Restore Remote Control, Prefer folder account, and the folder terminals start in.
 - **Launch at login**: registers a launchd LaunchAgent.
 
 Auto-switch, quota notifications and Auto-Prime are off by default. A terminal opened as an account stays on that account through switches; with **Restore Remote Control** on, it starts with `--remote-control` when the last session in that folder used it.
@@ -68,7 +68,6 @@ The backend takes a private instance lock and runs on a single-thread synchroniz
 - **Remote Control is not reconnected after a switch (Windows only).** A switch of the default login drops Remote Control in running Claude Code windows. On Windows the tray types `/remote-control` into idle ones (`dock/Shiftbar/RemoteControl.cs`, `ConsoleNudge.cs`); macOS has no equivalent yet (it would need the Accessibility API to read and type into Terminal). Type `/remote-control` in each window yourself.
 - **Exclusive switching is automatic only.** Automatic switches never move the default login onto an account another `cswap run` terminal is holding, because on macOS nothing keeps the two logins in step. A manual switch from the menu to such an account only warns.
 - **No consent dialog.** The Windows tray asks you to acknowledge Anthropic's terms the first time you turn on auto-switch; the macOS menu does not. The README's terms note applies all the same.
-- **Auto-switch threshold applies when Adaptive is off.** With **Adaptive switch threshold** on (the default), the backend picks the line per account and the fixed **Auto-switch threshold** menu is not used.
 - **Two settings are file-only.** The backend poll interval (`refreshSeconds` in `settings.json`) and the switch delay (`cswap config`) have no macOS menu entry.
 - **Menu bar menus, not a flyout.** Usage meters and pace lines are the engine's menu bar and dashboard, not the Windows flyout.
 

@@ -813,11 +813,11 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             }
             // Search keeps the rows whose name, hint or section match every word.
             settings.Search.Text = "upkeep switch";
-            Eq(["Auto-switch near limit", "Automatic switch line", "Switch at", "Random switch delay"], settings.VisibleRows.ToList(), "search \"upkeep switch\"");
+            Eq(["Auto-switch near limit", "Random switch delay"], settings.VisibleRows.ToList(), "search \"upkeep switch\"");
             settings.Search.Text = "quota";
             Eq(["Quota notifications"], settings.VisibleRows.ToList(), "search \"quota\"");
             settings.Search.Text = "";
-            Eq(10, settings.VisibleRows.Count(), "all settings rows");
+            Eq(8, settings.VisibleRows.Count(), "all settings rows");
             True(!settings.VisibleRows.Contains("Move running workflows"), "unsafe workflow migration is not offered");
             form.CloseSettings();
             True(!form.SettingsOpen, "closing settings leaves them open");

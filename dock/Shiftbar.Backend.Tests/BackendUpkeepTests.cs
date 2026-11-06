@@ -40,7 +40,7 @@ public sealed class BackendUpkeepTests
             Assert.Single(ResumeStopped.Scan([(dir, 2)], DateTime.UtcNow, includeBusy: true));
             await loop.Run(async () =>
             {
-                using var upkeep = new BackendUpkeep(new Engine("/bin/true"), new DockSettings { AutoSwitch = true, AutoLine = false },
+                using var upkeep = new BackendUpkeep(new Engine("/bin/true"), new DockSettings { AutoSwitch = true },
                     () => snapshot, (_, text) => notices.Add(text), () => Task.CompletedTask, followsLogins: false);
                 await upkeep.ResumeAsync(snapshot);
                 return true;
@@ -58,7 +58,7 @@ public sealed class BackendUpkeepTests
             Assert.True(Assert.Single(ResumeStopped.Scan([(dir, 2)], DateTime.UtcNow, includeBusy: true)).AtLimit);
             await loop.Run(async () =>
             {
-                using var upkeep = new BackendUpkeep(new Engine("/bin/true"), new DockSettings { AutoSwitch = true, AutoLine = false },
+                using var upkeep = new BackendUpkeep(new Engine("/bin/true"), new DockSettings { AutoSwitch = true },
                     () => limited, (_, text) => notices.Add(text), () => Task.CompletedTask, followsLogins: false);
                 await upkeep.ResumeAsync(limited);
                 return true;
