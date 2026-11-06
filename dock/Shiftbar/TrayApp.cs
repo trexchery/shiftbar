@@ -29,9 +29,9 @@ public sealed partial class TrayApp : ApplicationContext
     bool _watching; // a poll running
     double? _engineThreshold, _engineHysteresis; // the engine's own, so windows move at the line the default login switches at
     int _engineSwitchBuffer; // autoswitch.switchBufferSeconds, for the settings box
-    double Threshold => _settings.AutoLine && _snap?.Accounts.FirstOrDefault(a => a.Active) is { } on
+    double Threshold => _snap?.Accounts.FirstOrDefault(a => a.Active) is { } on
         ? _line.For(on, null) // the default login's automatic line
-        : _engineThreshold ?? 97; // the one fallback for it, until the engine's is read
+        : _engineThreshold ?? 97; // no login listed yet
     readonly SwitchLine _line = new();
     int _switches; // switches the tray made: an account list started before one is older than the state they left
 
@@ -284,7 +284,7 @@ public sealed partial class TrayApp : ApplicationContext
         {
             await _movePass.WaitAsync();
             _movePass.Release();
-            (_, events) = await _engine.AutoOnceAsync(_settings.AutoLine ? Threshold : null);
+            (_, events) = await _engine.AutoOnceAsync(Threshold);
         }
         finally { Interlocked.Decrement(ref _engineSwitches); }
         foreach (var e in events)
@@ -659,12 +659,10 @@ public sealed partial class TrayApp : ApplicationContext
     async Task ShowSettingsAsync()
     {
         var f = new SettingsPanel();
-        // The engine's threshold as the tray already read it: asking the engine again starts its process, a second's wait on every open.
+        // The engine's settings as the tray already read them: asking the engine again starts its process, a second's wait on every open.
         if (_engineThreshold == null) await ReadEngineThresholdAsync();
         if (_engineThreshold == null) { f.Dispose(); Error("Could not read engine settings", new EngineException("cswap config did not answer")); return; }
-        f.Threshold.Value = Math.Clamp((decimal)_engineThreshold.Value, f.Threshold.Minimum, f.Threshold.Maximum);
         f.SwitchBuffer.Value = Math.Clamp(_engineSwitchBuffer, (int)f.SwitchBuffer.Minimum, (int)f.SwitchBuffer.Maximum);
-        f.AutoLine.Checked = _settings.AutoLine;
         f.AutoSwitch.Checked = _settings.AutoSwitch;
         f.Startup.Checked = Startup.IsEnabled();
         f.AutoProject.Checked = _settings.AutoProjectAccount;
@@ -680,7 +678,6 @@ public sealed partial class TrayApp : ApplicationContext
 
     async Task SaveSettingsAsync(SettingsPanel f)
     {
-        var threshold = (double)f.Threshold.Value;
         try
         {
             Startup.Set(f.Startup.Checked);
@@ -690,17 +687,11 @@ public sealed partial class TrayApp : ApplicationContext
             _settings.QuotaNotifications = f.QuotaNotify.Checked;
             _settings.AutoPrime = f.AutoPrime.Checked;
             _settings.ReconnectRemoteControl = f.ReconnectRc.Checked;
-            _settings.AutoLine = f.AutoLine.Checked;
             _settings.Save();
             _timer.Interval = TimerMs;
             var autoSwitch = f.AutoSwitch.Checked;
             _dash.CloseSettings(); // every control is read: the flyout goes back now, the engine is told after
             if (autoSwitch != _settings.AutoSwitch) SetAutoSwitch(autoSwitch); // asks for the owner's yes first when switching on
-            if (threshold != _engineThreshold)
-            {
-                await _engine.CommandAsync("config", "set", "autoswitch.threshold", threshold.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                await ReadEngineThresholdAsync();
-            }
             var buffer = (int)f.SwitchBuffer.Value;
             if (buffer != _engineSwitchBuffer)
             {

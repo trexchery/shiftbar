@@ -23,7 +23,7 @@
 
 ## Why Shiftbar
 
-- **🔀 Switch without breaking anything.** One click, or auto-switch near a limit. A switch never closes or restarts a window, and on Windows Remote Control reconnects in idle windows afterwards.
+- **🔀 Switch without breaking anything.** One click, or auto-switch near a limit; an account you pick yourself stays until it runs out. A switch never closes or restarts a window, and on Windows Remote Control reconnects in idle windows afterwards.
 - **🪟 Accounts side by side.** Open a terminal as any account while the others keep running. Pin a project folder to an account.
 - **📊 Every limit in one place.** 5-hour and weekly meters for each account, a pace forecast, the next reset, and one `/stats` across all accounts.
 - **⏭️ Carry on at a limit.** On Windows, when a session stops at its limit, one click continues it on the account with room, conversation intact.

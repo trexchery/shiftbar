@@ -126,9 +126,10 @@ public sealed partial class Engine(string exe)
     /// Not `--exclusive` where the engine follows logins (Windows, Linux): an account a `cswap run` window holds is still switched to
     /// (the engine warns; it refuses only when that profile's login is ahead). On macOS nothing keeps the two logins in step (the
     /// profile's lives in a keychain entry only claude writes), so `--exclusive` stays: the engine refuses a held account.
+    /// `--auto`: not the owner's choice, so it drops (never sets) the engine's hold on a hand-picked account.
     public Task<SwitchResult> SwitchNowAsync(int number) => RunJsonAsync<SwitchResult>(SwitchNowArgs(number, OperatingSystem.IsMacOS()), gated: false);
 
-    internal static string[] SwitchNowArgs(int number, bool macOS) => macOS ? ["switch", number.ToString(), "--json", "--exclusive"] : ["switch", number.ToString(), "--json"];
+    internal static string[] SwitchNowArgs(int number, bool macOS) => macOS ? ["switch", number.ToString(), "--json", "--auto", "--exclusive"] : ["switch", number.ToString(), "--json", "--auto"];
 
     public async Task ImportUsageAsync(string document)
     {
@@ -159,17 +160,19 @@ public sealed partial class Engine(string exe)
         catch (Exception e) { log(e); }
     }
 
-    /// One auto-switch tick. The engine owns thresholds, cooldown, hysteresis,
+    /// One auto-switch tick. The engine owns cooldown, hysteresis, the hand-picked account's hold,
     /// quarantine and the disabled/API-key exclusions; exit 0=switched 2=no-op 3=blocked.
-    /// `threshold`: this tick's line instead of the engine's saved one (the tray's automatic line).
-    public async Task<(int Code, List<AutoEvent> Events)> AutoOnceAsync(double? threshold = null, CancellationToken ct = default)
+    public async Task<(int Code, List<AutoEvent> Events)> AutoOnceAsync(double threshold, CancellationToken ct = default)
     {
         // Pocket the random switch buffer (up to its 300 s ceiling) on top of the usual fetch time.
-        var r = await RunAsync(threshold is { } t
-            ? ["auto", "--once", "--json", "--threshold", t.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)]
-            : ["auto", "--once", "--json"], TimeSpan.FromSeconds(360), ct: ct);
+        var r = await RunAsync(AutoOnceArgs(threshold), TimeSpan.FromSeconds(360), ct: ct);
         return (r.ExitCode, ParseEvents(r.Stdout));
     }
+
+    /// `threshold`: the tray's automatic line. `best` whatever the saved strategy: consume-first moves while the login still
+    /// has room, onto accounts whose sooner weekly reset says nothing of their room, and the line moves it straight back.
+    internal static string[] AutoOnceArgs(double threshold) =>
+        ["auto", "--once", "--json", "--strategy", "best", "--threshold", threshold.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)];
 
     internal static List<AutoEvent> ParseEvents(string stdout)
     {

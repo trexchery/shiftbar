@@ -1243,6 +1243,15 @@ The original flag spellings (%(prog)s --switch, %(prog)s --list, ...) keep worki
         ),
     )
     parser.add_argument(
+        "--auto",
+        action="store_true",
+        help=(
+            "With 'switch <num|email>': an automatic switch (a limit was hit). "
+            "A switch without it is the user's choice, and auto-switch then "
+            "keeps that account until its 5-hour or weekly limit runs out"
+        ),
+    )
+    parser.add_argument(
         "--protect-live-default",
         action="store_true",
         help="Defer a switch while a default-profile Claude session is running or unreadable",
@@ -1526,22 +1535,34 @@ The original flag spellings (%(prog)s --switch, %(prog)s --list, ...) keep worki
             else:
                 models = parse_model_names(load_settings(switcher.backup_dir).model)
                 model_source = "autoswitch.model" if models else None
-            payload = switcher.switch(
-                strategy=args.strategy,
-                json_output=args.json,
-                models=models,
-                model_source=model_source,
+            from claude_swap.autoswitch import switch_recorded
+
+            payload = switch_recorded(
+                switcher,
+                lambda: switcher.switch(
+                    strategy=args.strategy,
+                    json_output=args.json,
+                    models=models,
+                    model_source=model_source,
+                ),
+                manual=True,
             )
             if payload is not None and models:
                 payload["models"] = list(models)
                 payload["modelSource"] = model_source
         elif args.switch_to:
-            payload = switcher.switch_to(
-                args.switch_to,
-                json_output=args.json,
-                force=args.force,
-                exclusive=args.exclusive,
-                protect_live_default=args.protect_live_default,
+            from claude_swap.autoswitch import switch_recorded
+
+            payload = switch_recorded(
+                switcher,
+                lambda: switcher.switch_to(
+                    args.switch_to,
+                    json_output=args.json,
+                    force=args.force,
+                    exclusive=args.exclusive,
+                    protect_live_default=args.protect_live_default,
+                ),
+                manual=not args.auto,
             )
         elif args.status:
             payload = switcher.status(json_output=args.json)

@@ -30,6 +30,7 @@ from claude_swap.autoswitch import (
     UnquarantineEvent,
     _recovery_is_useful,
     pct_label,
+    switch_recorded,
 )
 from claude_swap.exceptions import SwitchError
 from claude_swap.session import is_session_stale
@@ -7294,3 +7295,68 @@ class TestFreshenRoutesThroughGate:
         assert gate_calls["args"][0] == "2"
         assert "called" not in direct, "freshen must not POST outside the gate"
 
+
+class TestManualPin:
+    """A hand-picked account stays until its 5-hour or weekly window runs out.
+
+    Reported: the tray kept moving the login after the owner chose one, and
+    moved it several times in a row.
+    """
+
+    def _pick(self, h, num, *, manual=True):
+        switch_recorded(
+            h.switcher, lambda: h.switcher.switch_to(str(num), json_output=True),
+            manual=manual,
+        )
+
+    def _reasons(self, h):
+        return [e.reason for e in h.events if isinstance(e, NoSwitchEvent)]
+
+    def test_kept_past_the_line_then_left_once_the_week_runs_out(self, harness):
+        self._pick(harness, 2)
+        assert harness.state()["manualPin"] == "2"
+        assert harness.tick_with_usage(
+            {"1": _usage(10), "2": _usage(99), "3": _usage(10)}
+        ) is TickOutcome.NO_ACTION
+        assert harness.active_number() == 2
+        assert self._reasons(harness) == ["manual-pin"]
+        weekly_out = {"five_hour": {"pct": 20.0}, "seven_day": {"pct": 100.0}}
+        assert harness.tick_with_usage(
+            {"1": _usage(10), "2": weekly_out, "3": _usage(30)}
+        ) is TickOutcome.SWITCHED
+        assert next(e for e in harness.events if isinstance(e, SwitchEvent)).trigger == "at-limit"
+        assert harness.active_number() == 1
+        assert "manualPin" not in harness.state()
+
+    def test_unreadable_usage_is_not_running_out(self, harness):
+        self._pick(harness, 2)
+        for _ in range(harness.settings.unhealthy_ticks + 1):
+            harness.tick_with_usage({"1": _usage(10), "2": None, "3": _usage(10)})
+        assert harness.active_number() == 2
+        assert self._reasons(harness)[-1] == "manual-pin"
+
+    def test_an_automatic_switch_drops_the_pin(self, harness):
+        self._pick(harness, 2)
+        self._pick(harness, 3, manual=False)  # the tray's switch on a limit error
+        assert "manualPin" not in harness.state()
+        assert harness.tick_with_usage(
+            {"1": _usage(10), "2": _usage(50), "3": _usage(95)}
+        ) is TickOutcome.SWITCHED
+        assert harness.active_number() == 1
+
+    def test_a_switch_made_during_the_tick_stands(self, harness):
+        real = harness.engine._freshen_target
+
+        def user_switches_meanwhile(num, email):
+            status = real(num, email)
+            self._pick(harness, 2)
+            return status
+
+        with patch.object(harness.engine, "_freshen_target", side_effect=user_switches_meanwhile):
+            outcome = harness.tick_with_usage(
+                {"1": _usage(95), "2": _usage(40), "3": _usage(20)}
+            )
+        assert outcome is TickOutcome.NO_ACTION
+        assert harness.active_number() == 2
+        assert self._reasons(harness)[-1] == "decision-changed"
+        assert harness.state()["manualPin"] == "2"

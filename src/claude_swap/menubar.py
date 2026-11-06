@@ -548,7 +548,7 @@ def run(switcher, *, extension=None, app_name="claude-swap", icon=None) -> int:
         AppKit.NSApplicationActivationPolicyAccessory
     )
 
-    from claude_swap.autoswitch import AutoSwitchEngine
+    from claude_swap.autoswitch import AutoSwitchEngine, switch_recorded
     from claude_swap.settings import load_settings, set_setting
     from claude_swap.snapshot_source import SnapshotSource
 
@@ -884,13 +884,15 @@ def run(switcher, *, extension=None, app_name="claude-swap", icon=None) -> int:
             auto_item.state = 1 if self.settings.auto_switch_enabled else 0
             menu.add(auto_item)
 
-            threshold_menu = rumps.MenuItem("Auto-switch threshold")
-            current = self._threshold()
-            for pct in AUTO_THRESHOLD_CHOICES:
-                ch = rumps.MenuItem(f"{pct}%", callback=self._make_threshold(pct))
-                ch.state = 1 if current == pct else 0
-                threshold_menu.add(ch)
-            menu.add(threshold_menu)
+            # Shiftbar's backend picks the line itself (its burn-aware automatic line).
+            if not (extension is not None and getattr(extension, "hosts_auto_switch", False)):
+                threshold_menu = rumps.MenuItem("Auto-switch threshold")
+                current = self._threshold()
+                for pct in AUTO_THRESHOLD_CHOICES:
+                    ch = rumps.MenuItem(f"{pct}%", callback=self._make_threshold(pct))
+                    ch.state = 1 if current == pct else 0
+                    threshold_menu.add(ch)
+                menu.add(threshold_menu)
 
             return menu
 
@@ -917,14 +919,16 @@ def run(switcher, *, extension=None, app_name="claude-swap", icon=None) -> int:
 
         def _make_switch_to(self, num):
             def cb(_sender):
-                if self._guard(lambda: self.switcher.switch_to(str(num))):
+                if self._guard(lambda: switch_recorded(
+                        self.switcher, lambda: self.switcher.switch_to(str(num)), manual=True)):
                     self._notify_switched()
                     self.refresh_async()
             return cb
 
         def _switch(self, strategy):
             def cb(_sender):
-                if self._guard(lambda: self.switcher.switch(strategy=strategy)):
+                if self._guard(lambda: switch_recorded(
+                        self.switcher, lambda: self.switcher.switch(strategy=strategy), manual=True)):
                     self._notify_switched()
                     self.refresh_async()
             return cb

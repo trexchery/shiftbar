@@ -86,7 +86,6 @@ internal sealed class BackendHost
                 case "quotaNotifications": settings.QuotaNotifications = property.Value.GetBoolean(); break;
                 case "autoSwitch": settings.AutoSwitch = property.Value.GetBoolean(); break;
                 case "autoPrime": settings.AutoPrime = property.Value.GetBoolean(); break;
-                case "autoLine": settings.AutoLine = property.Value.GetBoolean(); break;
                 case "autoProjectAccount": settings.AutoProjectAccount = property.Value.GetBoolean(); break;
                 case "terminalFolder": settings.TerminalFolder = property.Value.ValueKind == JsonValueKind.Null ? null : Path.GetFullPath(property.Value.GetString()!); break;
                 case "refreshSeconds": settings.RefreshSeconds = Math.Clamp(property.Value.GetInt32(), 60, 3600); break;

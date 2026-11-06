@@ -31,7 +31,7 @@ internal sealed partial class BackendUpkeep : IDisposable
     readonly bool followsLogins;
     bool ticking, disposed;
 
-    public double EffectiveThreshold => settings.AutoLine && snapshot()?.Accounts.FirstOrDefault(a => a.Active) is { } active
+    public double EffectiveThreshold => snapshot()?.Accounts.FirstOrDefault(a => a.Active) is { } active
         ? switchLine.For(active, null) : threshold ?? 97;
 
     public void SettingsChanged()
@@ -157,7 +157,7 @@ internal sealed partial class BackendUpkeep : IDisposable
             if (!settings.AutoSwitch || disposed) return;
             var target = stop.AtLimit ? ResumeStopped.Target(stop, snap.Accounts, n => ResumeStopped.ProfileDir(n) != null,
                 EffectiveThreshold, hysteresis, DateTimeOffset.UtcNow, null, limits.RefusedUntil, LiveOrLaunching(), limits.ScopedRefusedUntil,
-                line: settings.AutoLine ? a => switchLine.For(a, stop.Model) : null, followsLogins: followsLogins) : null;
+                line: a => switchLine.For(a, stop.Model), followsLogins: followsLogins) : null;
             if (target is not { } number || !stop.AtLimit) continue;
             // Terminal.app can accept an AppleScript request without proving that
             // a replacement Claude session started. Keep the existing session
