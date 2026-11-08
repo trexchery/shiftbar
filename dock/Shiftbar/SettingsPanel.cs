@@ -8,6 +8,8 @@ public sealed class SettingsPanel : UserControl
     public readonly TextBox TerminalFolder = new() { PlaceholderText = "your user folder" };
     public readonly Toggle Startup = new("");
     public readonly Toggle AutoSwitch = new(""), AutoProject = new(""), QuotaNotify = new(""), AutoPrime = new(""), ReconnectRc = new("");
+    public readonly Toggle BrowserFollows = new(""), CloseOldWindows = new("");
+    public readonly ComboBox Browser = new() { DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = nameof(BrowserKind.Name) }; // installed browsers only
     public readonly TextBox Search = new() { PlaceholderText = "Search settings" };
 
     public event Action? SaveClicked, CancelClicked;
@@ -44,6 +46,12 @@ public sealed class SettingsPanel : UserControl
         Row("Auto-switch near limit", "Earlier on a busy account; one you pick stays until it runs out", AutoSwitch, Ui.S(34));
         Row("Random switch delay", "0 = at once; a random wait up to this many seconds", SwitchBuffer, Ui.S(72), "s");
         Row("Auto-Prime", "Start 5-hour windows early", AutoPrime, Ui.S(34));
+
+        Section("Browser");
+        Row("Open each account's browser profile", "When Shiftbar switches accounts it opens the new account's profile; name each profile after its Claude email or pick one per account",
+            BrowserFollows, Ui.S(34));
+        Row("Browser", null, Browser, Ui.S(150));
+        Row("Close the old account's windows", "Once every Claude session that started before the switch has ended", CloseOldWindows, Ui.S(34));
 
         var about = new Label
         {

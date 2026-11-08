@@ -37,11 +37,13 @@ The **Shiftbar** submenu adds:
 - **Open account dashboard**: the engine's interactive dashboard in Terminal.
 - **Sign in another account…**: the official Claude Code login in an isolated profile, then the account is added.
 - **Prime fresh 5-hour windows** and **Auto-Prime status**: start fresh windows early with one tiny request, now or automatically.
-- **Account tools**: for each account, **Open terminal…** (Claude Code as that account, in a folder you pick), **Set alias…** and **Assign folder…**, plus removing and viewing folder mappings.
-- **Settings**: Auto-Prime, Quota notifications, Restore Remote Control, Prefer folder account, and the folder terminals start in.
+- **Account tools**: for each account, **Open terminal…** (Claude Code as that account, in a folder you pick), **Set alias…**, **Assign folder…** and **Browser profile** (while the browser switch is on: Auto, the profile named after or signed in as the account's email, or one you pick), plus removing and viewing folder mappings.
+- **Settings**: Auto-Prime, Quota notifications, Restore Remote Control, Prefer folder account, **Open each account's browser profile**, **Close the old account's browser windows**, **Browser** (Google Chrome, Chrome Canary, Microsoft Edge or Brave, whichever are installed), and the folder terminals start in.
 - **Launch at login**: registers a launchd LaunchAgent.
 
-Auto-switch, quota notifications and Auto-Prime are off by default. A terminal opened as an account stays on that account through switches; with **Restore Remote Control** on, it starts with `--remote-control` when the last session in that folder used it.
+Auto-switch, quota notifications, Auto-Prime and the browser profile switch are off by default. A terminal opened as an account stays on that account through switches; with **Restore Remote Control** on, it starts with `--remote-control` when the last session in that folder used it.
+
+**Browser follows the account.** Claude in Chrome only connects when the extension is signed in to the same claude.ai account as Claude Code, so keep one browser profile per account. When the default login changes, Shiftbar opens the new account's profile (`open -na <browser> --args --profile-directory=…`) unless it already has a window. A running Claude session stays tied to the profile it started with, so the old profile's windows close only after every Claude session that started before the switch has ended. Closing goes through System Events and needs **System Settings → Privacy & Security → Accessibility** for Shiftbar; without it the windows stay open and the log says so once. Pending closes survive a restart (`browser_pending.json`) and expire after 7 days.
 
 The backend is started by the app. Its executable only answers:
 

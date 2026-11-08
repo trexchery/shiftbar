@@ -237,6 +237,7 @@ class MenuExtension:
     def __init__(self, *, native_smoke=False):
         self.client = BackendClient()
         self.snapshot: dict = {}
+        self.browser: dict = {}
         self._refreshing = False
         self._last_refresh = 0.0
         self._stopped = False
@@ -266,6 +267,10 @@ class MenuExtension:
         def take():
             try:
                 self.snapshot = self.client.request("status") or {}
+                try:
+                    self.browser = self.client.request("browserProfiles") or {}
+                except ClaudeSwitchError:
+                    self.browser = {}  # the account menu still works without browser choices
                 self._last_refresh = time.monotonic()
                 self.client.events.put({"event": "ui_changed"})
             finally:
@@ -371,13 +376,53 @@ class MenuExtension:
     def _desktop_settings(self, rumps):
         config = self.snapshot.get("config", {})
         menu = rumps.MenuItem("Settings")
+        defaults = {"preserveRemoteControl": True, "closeOldBrowserWindows": True}
         for key, title in (("autoPrime", "Auto-Prime"), ("quotaNotifications", "Quota notifications"),
-                           ("preserveRemoteControl", "Restore Remote Control"), ("autoProjectAccount", "Prefer folder account")):
-            value = bool(config.get(key, key == "preserveRemoteControl"))
+                           ("preserveRemoteControl", "Restore Remote Control"), ("autoProjectAccount", "Prefer folder account"),
+                           ("browserFollowsAccount", "Open each account's browser profile"),
+                           ("closeOldBrowserWindows", "Close the old account's browser windows")):
+            value = bool(config.get(key, defaults.get(key, False)))
             item = rumps.MenuItem(title, callback=lambda _, k=key, v=value: self._toggle_setting(k, not v, config))
             item.state = int(value)
             menu.add(item)
+        menu.add(self._browser_menu(rumps))
         menu.add(rumps.MenuItem("Choose terminal start folder…", callback=lambda _: self._set_terminal_folder()))
+        return menu
+
+    def _browser_menu(self, rumps):
+        menu = rumps.MenuItem("Browser")
+        chosen = self.browser.get("browser")
+        installed = self.browser.get("installed") or []
+        for browser in installed:
+            item = rumps.MenuItem(browser["name"], callback=lambda _, b=browser["id"]: self._toggle_setting("browser", b, None))
+            item.state = int(browser["id"] == chosen)
+            menu.add(item)
+        if not installed:
+            menu.add(rumps.MenuItem("No supported browser found"))
+        return menu
+
+    def _browser_profile_menu(self, rumps, email):
+        """Auto matches a profile named after (or signed in as) the email; a pick overrides it. None (hidden) while the
+        feature is off or the browser has no profiles, as on Windows."""
+        config = self.snapshot.get("config", {})
+        profiles = self.browser.get("profiles") or []
+        if not config.get("browserFollowsAccount") or not profiles:
+            return None
+        menu = rumps.MenuItem("Browser profile")
+        overrides = {k.lower(): v for k, v in (config.get("browserProfiles") or {}).items()}
+        picked = overrides.get(email.lower())
+        resolved = {k.lower(): v for k, v in (self.browser.get("resolved") or {}).items()}.get(email.lower())
+        auto_name = next((p["name"] for p in profiles if p["dir"] == resolved), None) if picked is None else None
+        auto = rumps.MenuItem("Auto: match email" + (f" ({auto_name})" if auto_name else ""),
+                              callback=lambda _: self._toggle_setting("browserProfile", {"email": email, "dir": None}, None))
+        auto.state = int(picked is None)
+        menu.add(auto)
+        for profile in profiles:
+            name, user = profile["name"] or profile["dir"], profile.get("userName") or ""
+            item = rumps.MenuItem(f"{name} · {user}" if user and user != name else name,  # Chrome's "Person 1" names repeat
+                                  callback=lambda _, d=profile["dir"]: self._toggle_setting("browserProfile", {"email": email, "dir": d}, None))
+            item.state = int(picked is not None and picked.lower() == profile["dir"].lower())
+            menu.add(item)
         return menu
 
     def _prime(self):
@@ -414,6 +459,8 @@ class MenuExtension:
             account.add(rumps.MenuItem("Open terminal…", callback=lambda _, n=number: self._claude_terminal(n)))
             account.add(rumps.MenuItem("Set alias…", callback=lambda _, n=number: self._alias(app, n)))
             account.add(rumps.MenuItem("Assign folder…", callback=lambda _, n=number: self._map(app, n)))
+            if (browser := self._browser_profile_menu(rumps, email)) is not None:
+                account.add(browser)
             menu.add(account)
         menu.add(rumps.MenuItem("Remove folder mapping…", callback=lambda _: self._map(app, None)))
         menu.add(rumps.MenuItem("View folder mappings", callback=lambda _: self._guard(lambda: run_terminal(app_command("--engine", "map")))))

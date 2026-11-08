@@ -101,3 +101,18 @@ def test_second_backend_cannot_open_same_state_and_empty_prime_sends_nothing(hos
     assert duplicate.returncode != 0
     send(12, "prime")
     assert receive(lambda value: value.get("id") == 12)["result"] == []
+
+
+def test_browser_settings_and_profiles(host):
+    process, send, receive, env = host
+    send(20, "settings", {"values": {"browserFollowsAccount": True, "browser": "edge", "closeOldBrowserWindows": False,
+                                     "browserProfile": {"email": "Synthetic@Example.com", "dir": "Profile 3"}}})
+    settings = receive(lambda value: value.get("id") == 20)["result"]
+    assert settings["browserFollowsAccount"] is True and settings["closeOldBrowserWindows"] is False
+    assert settings["browser"] == "edge" and settings["browserProfiles"] == {"Synthetic@Example.com": "Profile 3"}
+    send(21, "settings", {"values": {"browser": "netscape"}})
+    assert "Unknown browser" in receive(lambda value: value.get("id") == 21)["error"]["message"]
+    send(22, "browserProfiles")
+    info = receive(lambda value: value.get("id") == 22)["result"]
+    assert info["browser"] == "edge"
+    assert isinstance(info["installed"], list) and isinstance(info["profiles"], list) and info["resolved"] == {}
