@@ -804,7 +804,7 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             Application.DoEvents();
             True(form.SettingsOpen && form.Width >= settings.Width && form.Height > Ui.S(200),
                 $"settings fill the flyout: open={form.SettingsOpen}, flyout {form.Width}x{form.Height}, panel width {settings.Width}, needs height > {Ui.S(200)}");
-            Eq(["ACCOUNTS", "UPKEEP"], All(settings).OfType<Label>().Select(l => l.Text).Where(t => t is "ACCOUNTS" or "UPKEEP").ToList(), "the settings' section names");
+            Eq(["ACCOUNTS", "UPKEEP", "BROWSER"], All(settings).OfType<Label>().Select(l => l.Text).Where(t => t is "ACCOUNTS" or "UPKEEP" or "BROWSER").ToList(), "the settings' section names");
             if (Environment.GetEnvironmentVariable("DOCK_RENDER_SETTINGS_OUT") is { Length: > 0 } sOut)
             {
                 using var sb = new Bitmap(form.Width, form.Height);
@@ -816,8 +816,10 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
             Eq(["Auto-switch near limit", "Random switch delay"], settings.VisibleRows.ToList(), "search \"upkeep switch\"");
             settings.Search.Text = "quota";
             Eq(["Quota notifications"], settings.VisibleRows.ToList(), "search \"quota\"");
+            settings.Search.Text = "browser";
+            Eq(["Open each account's browser profile", "Browser", "Close the old account's windows"], settings.VisibleRows.ToList(), "search \"browser\"");
             settings.Search.Text = "";
-            Eq(8, settings.VisibleRows.Count(), "all settings rows");
+            Eq(11, settings.VisibleRows.Count(), "all settings rows");
             True(!settings.VisibleRows.Contains("Move running workflows"), "unsafe workflow migration is not offered");
             form.CloseSettings();
             True(!form.SettingsOpen, "closing settings leaves them open");

@@ -61,6 +61,7 @@ internal sealed class BackendHost
                 "refresh" => await RefreshAsync(),
                 "settings" => SaveSettings(args),
                 "prime" => await upkeep.PrimeNowAsync(),
+                "browserProfiles" => BrowserInfo(settings, accounts),
                 "quit" => Quit(),
                 _ => throw new EngineException("Unknown backend method: " + method),
             };
@@ -77,7 +78,14 @@ internal sealed class BackendHost
 
     object SaveSettings(JsonElement args)
     {
-        var values = args.TryGetProperty("values", out var v) ? v : args;
+        Apply(settings, args.TryGetProperty("values", out var v) ? v : args);
+        settings.Save();
+        upkeep.SettingsChanged();
+        return settings;
+    }
+
+    internal static void Apply(DockSettings settings, JsonElement values)
+    {
         foreach (var property in values.EnumerateObject())
         {
             switch (property.Name)
@@ -89,12 +97,40 @@ internal sealed class BackendHost
                 case "autoProjectAccount": settings.AutoProjectAccount = property.Value.GetBoolean(); break;
                 case "terminalFolder": settings.TerminalFolder = property.Value.ValueKind == JsonValueKind.Null ? null : Path.GetFullPath(property.Value.GetString()!); break;
                 case "refreshSeconds": settings.RefreshSeconds = Math.Clamp(property.Value.GetInt32(), 60, 3600); break;
+                case "browserFollowsAccount": settings.BrowserFollowsAccount = property.Value.GetBoolean(); break;
+                case "closeOldBrowserWindows": settings.CloseOldBrowserWindows = property.Value.GetBoolean(); break;
+                case "browser":
+                    settings.Browser = BrowserProfiles.Find(property.Value.GetString())?.Id ?? throw new EngineException("Unknown browser: " + property.Value.GetString());
+                    break;
+                case "browserProfile": // {email, dir}; a null dir goes back to matching by email
+                    var email = property.Value.GetProperty("email").GetString();
+                    if (string.IsNullOrWhiteSpace(email)) throw new EngineException("browserProfile needs an email");
+                    // A new dictionary, never edited in place: the browser step reads it on the thread pool.
+                    var picks = new Dictionary<string, string>(settings.BrowserProfiles, StringComparer.OrdinalIgnoreCase);
+                    if (property.Value.TryGetProperty("dir", out var dir) && dir.GetString() is { Length: > 0 } d) picks[email] = d;
+                    else picks.Remove(email);
+                    settings.BrowserProfiles = picks;
+                    break;
                 default: throw new EngineException("Unsupported desktop setting: " + property.Name);
             }
         }
-        settings.Save();
-        upkeep.SettingsChanged();
-        return settings;
+    }
+
+    /// The menu's browser choices: installed browsers, the chosen one's profiles, and which profile each account resolves to.
+    internal static object BrowserInfo(DockSettings settings, Snapshot? accounts,
+        Func<string, (IReadOnlyList<BrowserProfile> Profiles, IReadOnlySet<string> LastActive)>? readState = null)
+    {
+        var (profiles, _) = (readState ?? BrowserProfiles.ReadState)(settings.Browser);
+        var resolved = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var account in accounts?.Accounts ?? [])
+            resolved[account.Email] = BrowserProfiles.Resolve(account.Email, settings.BrowserProfiles, profiles)?.Dir;
+        return new
+        {
+            browser = settings.Browser,
+            installed = BrowserProfiles.Installed().Select(b => new { id = b.Id, name = b.Name }).ToList(),
+            profiles = profiles.Select(p => new { dir = p.Dir, name = p.Name, userName = p.UserName }).ToList(),
+            resolved,
+        };
     }
 
     async Task<bool> RefreshAsync()

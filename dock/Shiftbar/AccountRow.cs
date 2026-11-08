@@ -10,6 +10,8 @@ public sealed class AccountRow : Control
     public event Action<Account>? TerminalClicked;
     public event Action<Account, string>? MenuAction;
     public event Action<AccountRow>? ExpandRequested;
+    /// The "Browser profile" submenu's (label, MenuAction, checked) entries, read when the menu opens; null or none: no submenu.
+    public Func<Account, IReadOnlyList<(string Label, string Action, bool Checked)>?>? BrowserChoices;
 
     public const int BaseWidth = 320;
     static readonly Font NameFont = Ui.Font(9f, semibold: true), MetaFont = Ui.Font(8f), SmallFont = Ui.Font(7.5f);
@@ -160,6 +162,13 @@ public sealed class AccountRow : Control
                 proj.DropDownItems.Add(folder);
             }
             menu.Items.Add(proj);
+        }
+        if (BrowserChoices?.Invoke(_a) is { Count: > 0 } choices)
+        {
+            var browser = new ToolStripMenuItem("Browser profile");
+            foreach (var (label, action, on) in choices)
+                browser.DropDownItems.Add(new ToolStripMenuItem(label, null, (_, _) => MenuAction?.Invoke(_a, action)) { Checked = on });
+            menu.Items.Add(browser);
         }
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(_a.Disabled ? "Include in auto-switch" : "Exclude from auto-switch", null,

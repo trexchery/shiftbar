@@ -72,6 +72,7 @@ Shiftbar is built on claude-swap's credential and usage engine. Everything stays
 - folder pins
 - live Sessions panel (Windows)
 - Remote Control reconnect (Windows)
+- browser profile follows the account (opt-in)
 
 </td>
 <td width="33%" valign="top">
@@ -96,6 +97,7 @@ Shiftbar is built on claude-swap's credential and usage engine. Everything stays
 - **Local only.** No telemetry, no cloud sync, no proxy. Logins stay on your machine: DPAPI on Windows, the Keychain on macOS.
 - **Never interrupts.** Shiftbar doesn't close or restart a window you can see. With auto-switch on, a session whose terminal has already died is reopened with `--resume` (Windows). The only thing it ever types is `/remote-control`, into an idle window with an empty prompt, while you're away from the keyboard.
 - **Windows only, for now:** the Sessions panel, Continue on, reopening dead sessions with `--resume`, and Remote Control reconnect. macOS has the rest in its menu bar; [docs/macos.md](docs/macos.md) lists the gaps.
+- **Browser follows the account (opt-in).** Claude in Chrome only connects when the extension is signed in to the same claude.ai account as Claude Code, so keep one Chrome, Edge or Brave profile per account (named after its email, or picked per account). On a switch Shiftbar opens the new account's profile, and can close the old one's windows once every Claude session that started before the switch has ended: a running session stays tied to the profile it started with. On macOS, closing windows needs Accessibility permission.
 - **One `/stats`.** Usage on your other accounts is added to the "All time" view of your normal `claude` once each UTC day ends. Preview with `cswap stats-sync --dry-run`.
 - **Unsigned releases**, so SmartScreen may warn. A `.sha256` checksum ships with every download. See [SECURITY.md](SECURITY.md).
 - **Upgrading from Patch Goblins:** quit the old tray and run `shiftbar.exe` once. Settings, logins and autostart carry over.

@@ -29,6 +29,7 @@ public sealed class DashboardForm : Form
     public event Action<Account>? SwitchRequested;
     public event Action<Account>? TerminalRequested;
     public event Action<Account, string>? AccountAction;
+    public Func<Account, IReadOnlyList<(string Label, string Action, bool Checked)>?>? BrowserChoices; // handed to each row
     public event Action<LiveSession>? SessionTerminalRequested, ContinueRequested;
     public event Action? RefreshRequested, SettingsRequested, AddRequested, UseBestRequested, Moved;
     public event Action<bool>? PinToggled;
@@ -248,6 +249,7 @@ public sealed class DashboardForm : Form
             row.SwitchClicked += x => SwitchRequested?.Invoke(x);
             row.TerminalClicked += x => TerminalRequested?.Invoke(x);
             row.MenuAction += (x, act) => AccountAction?.Invoke(x, act);
+            row.BrowserChoices = BrowserChoices;
             row.ExpandRequested += ToggleRow;
             row.SizeChanged += (_, _) => FitHeight();
             if (a.Number == _expanded) row.SetExpanded(true, animate: false);

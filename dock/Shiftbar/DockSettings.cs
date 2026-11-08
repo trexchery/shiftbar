@@ -19,6 +19,16 @@ public sealed class DockSettings
     public bool QuotaNotifications { get; set; }
     public bool AutoPrime { get; set; }
     public string? TerminalFolder { get; set; } // where "Open terminal" starts browsing; null: the user folder
+    public bool BrowserFollowsAccount { get; set; } // opens the new account's browser profile on a switch (BrowserFollow)
+    public string Browser { get; set; } = "chrome"; // a BrowserProfiles.Browsers id
+    public bool CloseOldBrowserWindows { get; set; } = true;
+    Dictionary<string, string> _browserProfiles = new(StringComparer.OrdinalIgnoreCase);
+    /// Email -> profile dir picked by hand. The setter re-wraps, since JSON load hands over a case-sensitive dictionary.
+    public Dictionary<string, string> BrowserProfiles
+    {
+        get => _browserProfiles;
+        set => _browserProfiles = new(value ?? [], StringComparer.OrdinalIgnoreCase);
+    }
     // Keys an older settings.json may still hold (Agent*, AskApproval, MoveWorkflows*, AutoLine) are ignored on load and dropped on the next save.
 
     public const int MinRefreshSeconds = 60;

@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>shiftbar-backend</AssemblyName>
-    <Version>0.7.0</Version>
+    <Version>0.8.0</Version>
     <Product>Shiftbar</Product>
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
@@ -21,6 +21,7 @@
     <Compile Include="../Shiftbar/LimitWatch.cs" Link="Shared/LimitWatch.cs" />
     <Compile Include="../Shiftbar/ResumeStopped.cs" Link="Shared/ResumeStopped.cs" />
     <Compile Include="../Shiftbar/QuotaAlerts.cs" Link="Shared/QuotaAlerts.cs" />
+    <Compile Include="../Shiftbar/BrowserProfiles.cs" Link="Shared/BrowserProfiles.cs" />
     <InternalsVisibleTo Include="Shiftbar.Backend.Tests" />
   </ItemGroup>
 </Project>

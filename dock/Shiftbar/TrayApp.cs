@@ -61,6 +61,7 @@ public sealed partial class TrayApp : ApplicationContext
         _dash.SwitchRequested += a => _ = SwitchAsync(a);
         _dash.TerminalRequested += a => _ = AccountActionAsync(a, "terminal-folder");
         _dash.AccountAction += (a, act) => _ = AccountActionAsync(a, act);
+        _dash.BrowserChoices = BrowserChoices;
         _dash.RefreshRequested += () => _ = TickAsync(runAuto: false, refresh: true);
         _dash.SettingsRequested += () => { if (_dash.SettingsOpen) _dash.CloseSettings(); else _ = ShowSettingsAsync(); };
         _dash.AddRequested += () => _ = EnrollAsync(null);
@@ -151,6 +152,7 @@ public sealed partial class TrayApp : ApplicationContext
                 Notify("Auto-Prime paused", _primeProblem, ToolTipIcon.Warning);
             fresh = _snap;
             RcObserve(_snap.ActiveAccountNumber); // a login change drops Remote Control in default-login windows
+            BrowserObserve(); // and opens the new account's browser profile
             _engine.StatsSyncTick(Program.Log);
             await ResumeStoppedAsync(_snap, recover: runAuto && _settings.AutoSwitch); // the Sessions list and stop notices always; orphan recovery with auto-switch
             _error = null;
@@ -215,6 +217,7 @@ public sealed partial class TrayApp : ApplicationContext
                 _limitWatch.Poll(ResumeStopped.LiveTranscripts(dirs, DateTime.UtcNow));
             });
             await RcTickAsync();
+            BrowserTick();
         }
         catch (Exception e) { Program.Log(e); }
         finally { _watching = false; }
@@ -377,6 +380,7 @@ public sealed partial class TrayApp : ApplicationContext
         _switches++;
         if (_snap is { } s) _snap = s with { ActiveAccountNumber = n, Accounts = [.. s.Accounts.Select(a => a with { Active = a.Number == n })] };
         RcObserve(n);
+        BrowserObserve();
     }
 
     static string MovesPath => Path.Combine(DockSettings.Dir, "resumed.json");
@@ -578,6 +582,9 @@ public sealed partial class TrayApp : ApplicationContext
                 case not null when action.StartsWith("project-remove:"):
                     Notify("Project folder removed", await _engine.CommandAsync("unmap", action["project-remove:".Length..]));
                     break;
+                case not null when action.StartsWith("browser-profile:"):
+                    SetBrowserProfile(a, action["browser-profile:".Length..]);
+                    return;
                 case "enable" or "disable":
                     await _engine.CommandAsync(action, a.Number.ToString());
                     break;
@@ -670,6 +677,16 @@ public sealed partial class TrayApp : ApplicationContext
         f.QuotaNotify.Checked = _settings.QuotaNotifications;
         f.AutoPrime.Checked = _settings.AutoPrime;
         f.ReconnectRc.Checked = _settings.ReconnectRemoteControl;
+        f.BrowserFollows.Checked = _settings.BrowserFollowsAccount;
+        f.CloseOldWindows.Checked = _settings.CloseOldBrowserWindows;
+        f.Browser.Items.AddRange([.. BrowserProfiles.Installed()]);
+        f.Browser.SelectedItem = BrowserProfiles.Find(_settings.Browser);
+        if (f.Browser.Items.Count == 0) // as on macOS; a plain string is never saved as the browser
+        {
+            f.Browser.Items.Add("No supported browser found");
+            f.Browser.SelectedIndex = 0;
+            f.Browser.Enabled = false;
+        }
         f.CancelClicked += _dash.CloseSettings;
         f.SaveClicked += () => _ = SaveSettingsAsync(f);
         if (!_dash.Visible) ShowDashboard();
@@ -687,6 +704,9 @@ public sealed partial class TrayApp : ApplicationContext
             _settings.QuotaNotifications = f.QuotaNotify.Checked;
             _settings.AutoPrime = f.AutoPrime.Checked;
             _settings.ReconnectRemoteControl = f.ReconnectRc.Checked;
+            _settings.BrowserFollowsAccount = f.BrowserFollows.Checked;
+            _settings.CloseOldBrowserWindows = f.CloseOldWindows.Checked;
+            if (f.Browser.SelectedItem is BrowserKind browser) _settings.Browser = browser.Id;
             _settings.Save();
             _timer.Interval = TimerMs;
             var autoSwitch = f.AutoSwitch.Checked;

@@ -23,8 +23,10 @@ internal sealed partial class BackendUpkeep : IDisposable
     readonly string movesPath = Path.Combine(DockSettings.Dir, "resumed.json");
     readonly LimitWatch watch;
     readonly LimitSwitch limits;
-    DateTimeOffset lastConfig, lastPrime, lastAuto;
-    Task? autoTask;
+    readonly BrowserFollow browser;
+    readonly Dictionary<string, MacBrowserHost?> browserHosts = new(StringComparer.OrdinalIgnoreCase);
+    DateTimeOffset lastConfig, lastPrime, lastAuto, lastBrowser;
+    Task? autoTask, browserTask;
     CancellationTokenSource? autoCancel;
     double? threshold;
     double hysteresis = 10;
@@ -54,6 +56,32 @@ internal sealed partial class BackendUpkeep : IDisposable
         limits = new(snapshot, ResumeStopped.DefaultLogin, LiveOrLaunching,
             engine.ImportUsageAsync, engine.SwitchNowAsync, reported, Program.Log,
             threshold: () => EffectiveThreshold, hysteresis: () => hysteresis, followsLogins: this.followsLogins);
+        browser = new(() => settings, BrowserHost, () => ResumeStopped.LiveSessions([(ResumeStopped.DefaultDir, null)]),
+            () => DateTime.UtcNow, Path.Combine(DockSettings.Dir, "browser_pending.json"), Program.Log);
+    }
+
+    // Cached so the Accessibility hint is logged once per browser, not once per tick; a browser not installed yet is looked up again.
+    MacBrowserHost? BrowserHost(string id)
+    {
+        if (browserHosts.TryGetValue(id, out var host)) return host;
+        host = OperatingSystem.IsMacOS() && BrowserProfiles.Find(id) is { } kind && kind.ExePath() is { } app ? new MacBrowserHost(kind, app, Program.Log) : null;
+        if (host is not null) browserHosts[id] = host;
+        return host;
+    }
+
+    /// The default login's email, mapped through the snapshot; unreadable, never switched or not listed yet: null (unknown).
+    internal static string? LoginEmail((int? Account, DateTime ChangedAt) login, Snapshot snap) =>
+        login.Account is { } n ? snap.Accounts.FirstOrDefault(a => a.Number == n)?.Email : null;
+
+    /// Never awaited: osascript can take up to a minute, and the limit watcher and auto-switch must not wait on it.
+    void BrowserStep(Snapshot snap)
+    {
+        if (browserTask is { IsCompleted: false }) return;
+        var login = ResumeStopped.DefaultLogin();
+        var email = LoginEmail(login, snap);
+        var due = DateTimeOffset.Now - lastBrowser >= TimeSpan.FromSeconds(10);
+        if (due) lastBrowser = DateTimeOffset.Now;
+        browserTask = Task.Run(() => { browser.Observe(email, login.ChangedAt); if (due) browser.Tick(email); });
     }
 
     HashSet<int> LiveOrLaunching()
@@ -74,6 +102,7 @@ internal sealed partial class BackendUpkeep : IDisposable
             switchLine.Observe(snap.Accounts, DateTimeOffset.Now);
             if (settings.QuotaNotifications && QuotaAlerts.Balloon(notices) is { } balloon)
                 notify(balloon.Title, balloon.Text);
+            BrowserStep(snap);
             var now = DateTimeOffset.Now;
             if ((settings.AutoSwitch || settings.AutoPrime) && now - lastConfig > TimeSpan.FromMinutes(3))
                 await ReadConfigAsync();

@@ -156,6 +156,75 @@ def test_desktop_settings_offer_only_account_settings():
     assert not any("pull request" in t.lower() or "issues" in t.lower() or "approval" in t.lower() for t in titles)
 
 
+class _Item:
+    def __init__(self, title, callback=None):
+        self.title = title
+        self.callback = callback
+        self.children = []
+        self.state = 0
+
+    def add(self, item):
+        self.children.append(item)
+
+
+def _browser_extension():
+    client = MagicMock()
+    with patch("claude_swap.shiftbar_mac.BackendClient", return_value=client):
+        extension = shiftbar_mac.MenuExtension()
+    extension._background = lambda fn: fn()
+    extension._refresh = MagicMock()
+    extension.browser = {"browser": "chrome-canary",
+                         "installed": [{"id": "chrome", "name": "Google Chrome"}, {"id": "chrome-canary", "name": "Google Chrome Canary"}],
+                         "profiles": [{"dir": "Default", "name": "a@example.com", "userName": ""},
+                                      {"dir": "Profile 2", "name": "Work", "userName": "w@example.com"}],
+                         "resolved": {"A@example.com": "Default", "b@example.com": "Profile 2"}}
+    return extension, client
+
+
+def test_browser_settings_offer_installed_browsers_and_save_the_choice():
+    extension, client = _browser_extension()
+    extension.snapshot = {"config": {"browserFollowsAccount": True}}
+    menu = extension._desktop_settings(types.SimpleNamespace(MenuItem=_Item))
+    toggles = {item.title: item for item in menu.children}
+    assert toggles["Open each account's browser profile"].state == 1
+    assert toggles["Close the old account's browser windows"].state == 1  # on by default
+    browsers = toggles["Browser"].children
+    assert [(b.title, b.state) for b in browsers] == [("Google Chrome", 0), ("Google Chrome Canary", 1)]
+    browsers[0].callback(None)
+    client.request.assert_called_once_with("settings", {"values": {"browser": "chrome"}})
+    extension.browser = {}
+    menu = extension._desktop_settings(types.SimpleNamespace(MenuItem=_Item))
+    assert [b.title for b in next(i for i in menu.children if i.title == "Browser").children] == ["No supported browser found"]
+
+
+def test_account_browser_profile_menu_marks_auto_or_the_pick_and_saves_overrides():
+    extension, client = _browser_extension()
+    extension.snapshot = {"config": {"browserFollowsAccount": True, "browserProfiles": {"B@EXAMPLE.COM": "profile 2"}}}
+    app = types.SimpleNamespace(snapshot={"accounts": [(1, "a@example.com", True, "", None, None, False, None),
+                                                       (2, "b@example.com", False, "", None, None, False, None)]})
+    menu = extension._account_tools(app, types.SimpleNamespace(MenuItem=_Item))
+    first, second = (next(c for c in account.children if c.title == "Browser profile") for account in menu.children[:2])
+    assert [(c.title, c.state) for c in first.children] == [("Auto: match email (a@example.com)", 1), ("a@example.com", 0), ("Work · w@example.com", 0)]
+    assert [(c.title, c.state) for c in second.children] == [("Auto: match email", 0), ("a@example.com", 0), ("Work · w@example.com", 1)]
+    first.children[2].callback(None)
+    client.request.assert_called_with("settings", {"values": {"browserProfile": {"email": "a@example.com", "dir": "Profile 2"}}})
+    second.children[0].callback(None)
+    client.request.assert_called_with("settings", {"values": {"browserProfile": {"email": "b@example.com", "dir": None}}})
+
+
+def test_account_browser_profile_menu_is_hidden_while_off_or_without_profiles():
+    extension, _client = _browser_extension()
+    app = types.SimpleNamespace(snapshot={"accounts": [(1, "a@example.com", True, "", None, None, False, None)]})
+    def titles():
+        return [c.title for c in extension._account_tools(app, types.SimpleNamespace(MenuItem=_Item)).children[0].children]
+    extension.snapshot = {"config": {}}
+    assert "Browser profile" not in titles()
+    extension.snapshot = {"config": {"browserFollowsAccount": True}}
+    assert "Browser profile" in titles()
+    extension.browser = {}
+    assert "Browser profile" not in titles()
+
+
 def test_terminal_command_quotes_paths_and_never_uses_shell(monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
