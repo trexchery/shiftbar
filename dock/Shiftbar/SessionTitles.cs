@@ -106,9 +106,17 @@ public sealed class SessionTitles
     }
 
     /// Titles Shiftbar picks (Haiku's, or Claude's own as a fallback) are at most four words; the user's /rename is kept whole.
+    /// A cut never ends on a joining word ("API Key Setup for"), nor on a dash or comma.
     public const int MaxWords = 4;
-    public static string? Short(string? title) =>
-        title == null ? null : string.Join(' ', title.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(MaxWords)).TrimEnd(',', ';', ':', '-', '–', '—', ' ');
+    static readonly HashSet<string> Joiners = new(StringComparer.OrdinalIgnoreCase)
+        { "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "at", "by", "with", "from", "into", "via", "vs", "&", "-", "–", "—" };
+    public static string? Short(string? title)
+    {
+        if (title == null) return null;
+        var words = title.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(MaxWords).ToList();
+        while (words.Count > 1 && Joiners.Contains(words[^1].TrimEnd(',', ';', ':'))) words.RemoveAt(words.Count - 1);
+        return string.Join(' ', words).TrimEnd(',', ';', ':', '-', '–', '—', ' ');
+    }
 
     /// Titles the session again from its latest prompts, on `account` (the default login). Nothing happens when the user
     /// renamed it, it has no typed prompts, or they are the ones it was last titled from. Never throws.
