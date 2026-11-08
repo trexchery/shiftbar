@@ -14,7 +14,7 @@ internal static class Program
             Console.WriteLine("Shiftbar backend: --serve | --version");
             return 0;
         }
-        if (args is ["--version"]) { Console.WriteLine("Shiftbar 0.8.1"); return 0; }
+        if (args is ["--version"]) { Console.WriteLine("Shiftbar 0.8.2"); return 0; }
         if (args is not ["--serve"])
         {
             Console.Error.WriteLine("Usage: shiftbar-backend --serve | --version");
