@@ -95,15 +95,26 @@ public sealed class SessionTitles
     public static string Ask(IReadOnlyList<string> prompts, string? current) =>
         "Name this Claude Code session. Below are the user's most recent requests in it, oldest first."
         + (current != null ? $" Its current name is \"{current}\"; keep it if it still fits." : "")
-        + $" Reply with only a title of 2 to {MaxWords} words for what the session is about now: no quotes, no ending punctuation.\n\n"
+        + $" Reply with only a title of 2 to {MaxWords} words (never more than {MaxWords}) for what the session is about now: no quotes, no ending punctuation.\n\n"
         + string.Join("\n", prompts.Select((p, i) => $"{i + 1}. {p}"));
 
+    /// The follow-up when Haiku's title was too long: the same request, told what it got wrong.
+    public static string AskShorter(string ask, string tooLong) =>
+        ask + $"\n\nYour title \"{tooLong}\" has more than {MaxWords} words. Reply with a title of at most {MaxWords} words.";
+
     /// Haiku's reply as a title: its first line without quotes, markdown or ending punctuation, then `Typeable`.
-    public static string? Clean(string? reply)
+    public static string? Clean(string? reply) => Short(Uncut(reply));
+
+    /// `Clean` before the four-word cut, so a too-long reply can be noticed and asked again.
+    static string? Uncut(string? reply)
     {
         var first = reply?.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
-        return Short(RemoteControl.Typeable(first?.Trim('"', '\'', '*', '#', '`', '“', '”', ' ').TrimEnd('.', '!', ':', ' ')));
+        return RemoteControl.Typeable(first?.Trim('"', '\'', '*', '#', '`', '“', '”', ' ').TrimEnd('.', '!', ':', ' '));
     }
+
+    /// The reply's title when it is over `MaxWords` words, else null.
+    public static string? TooLong(string? reply) =>
+        Uncut(reply) is { } t && t.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length > MaxWords ? t : null;
 
     /// Titles Shiftbar picks (Haiku's, or Claude's own as a fallback) are at most four words; the user's /rename is kept whole.
     /// A cut never ends on a joining word ("API Key Setup for"), nor on a dash or comma.
@@ -130,7 +141,11 @@ public sealed class SessionTitles
             if (prompts.Count == 0 || titles.Renamed(sessionId, customs, ai) != null) return;
             var basis = Basis(prompts);
             if (titles.Sessions.TryGetValue(sessionId, out var was) && was.Basis == basis) return;
-            if (Clean(await engine.TitleAsync(account, Ask(prompts, titles.Current(sessionId) ?? Short(RemoteControl.Typeable(ai))))) is not { } title) return;
+            var ask = Ask(prompts, titles.Current(sessionId) ?? Short(RemoteControl.Typeable(ai)));
+            var reply = await engine.TitleAsync(account, ask);
+            // Haiku sometimes ignores the word limit: asked once more, then cut (`Short`) if it still runs over.
+            if (TooLong(reply) is { } tooLong && await engine.TitleAsync(account, AskShorter(ask, tooLong)) is { } retry && Clean(retry) != null) reply = retry;
+            if (Clean(reply) is not { } title) return;
             await Gate.WaitAsync();
             try
             {
