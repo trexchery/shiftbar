@@ -360,7 +360,7 @@ public sealed partial class TrayApp : ApplicationContext
                 || ResumeStopped.HasLiveTwin(s)) continue;
             if (!await ResumeStopped.CloseAsync(s.Pid, s.Record)) continue;
             try { ResumeStopped.CopyTranscript(s, dir); } catch (Exception e) { Program.Log(e); }
-            try { _engine.LaunchConsole($"Claude · #{n} · resumed", s.Cwd, Launch.Run(n, _settings.PreserveRemoteControl, RemoteControl.WithRc(ResumeStopped.ResumeArgs(s), s.Transcript, _settings.PreserveRemoteControl))); }
+            try { _engine.LaunchConsole(RemoteControl.TitleOf(s.Transcript) ?? $"Claude · #{n} · resumed", s.Cwd, Launch.Run(n, _settings.PreserveRemoteControl, RemoteControl.WithRc(ResumeStopped.ResumeArgs(s), s.Transcript, _settings.PreserveRemoteControl))); }
             catch (Exception e)
             {
                 Program.Log(e); // its claude is already ended: say so, the transcript is intact for `--resume`

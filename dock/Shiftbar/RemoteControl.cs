@@ -128,10 +128,54 @@ public static class RemoteControl
 
     /// `claudeArgs` plus `--remote-control` when `on`, the transcript shows RC was connected, and the args do not ask already.
     /// The stopped session's own transcript decides, whatever `remoteControlAtStartup` says: the engine's `--restore-rc` looks
-    /// only at the profile the new window runs in.
+    /// only at the profile the new window runs in. The session's title goes with it (`--remote-control=<title>`), so the
+    /// Claude app lists it under the same name it had on the previous account.
     public static string[] WithRc(string[] claudeArgs, string transcript, bool on) =>
         !on || claudeArgs.Any(a => a is "--remote-control" or "--rc" || a.StartsWith("--remote-control=") || a.StartsWith("--rc="))
-            || !BridgeOf(transcript).Used ? claudeArgs : [.. claudeArgs, "--remote-control"];
+            || !BridgeOf(transcript).Used ? claudeArgs
+            : [.. claudeArgs, TitleOf(transcript) is { } t ? "--remote-control=" + t : "--remote-control"];
+
+    /// What `ConsoleNudge` types: `/remote-control <title>`, or the bare command when the session has no usable title.
+    public static string Command(string? title) => title == null ? ConsoleNudge.Command : ConsoleNudge.Command + " " + title;
+
+    /// The name a session goes by: its `/rename` title, else the title Claude Code gave it. The Claude app and the terminal
+    /// tab already show that name; without it a reconnect is listed by its last message or a made-up name. Null when there
+    /// is none, or it holds characters that could not be typed and read back reliably (see `Typeable`).
+    public static string? TitleOf(string transcript)
+    {
+        try
+        {
+            string? custom = null, ai = null;
+            foreach (var line in ResumeStopped.Tail(transcript, ScanBytes))
+            {
+                var isCustom = line.Contains("\"custom-title\"", StringComparison.Ordinal);
+                if (!isCustom && !line.Contains("\"ai-title\"", StringComparison.Ordinal)) continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    if (doc.RootElement.ValueKind != JsonValueKind.Object) continue;
+                    if (isCustom && Str(doc.RootElement, "type") == "custom-title") custom = Str(doc.RootElement, "customTitle") ?? custom;
+                    else if (Str(doc.RootElement, "type") == "ai-title") ai = Str(doc.RootElement, "aiTitle") ?? ai;
+                }
+                catch (JsonException) { } // a line cut by the tail window, or one being written
+            }
+            return Typeable(custom) ?? Typeable(ai);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// `title` with runs of whitespace made one space and cut to 60 characters at a word, or null when empty or when it
+    /// holds a character outside printable Latin (control characters, emoji, CJK): those are typed as key events with no
+    /// key and drawn two cells wide, so the prompt could not be read back to check what was typed. A `"` becomes `'`: the
+    /// title also rides in a console's command line, where Windows Terminal re-joins tokens that must never hold a `"`.
+    internal static string? Typeable(string? title)
+    {
+        if (title == null) return null;
+        var t = string.Join(' ', title.Replace('"', '\'').Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (t.Length == 0 || t.Any(c => c < ' ' || c is > '~' and < ' ' || c > 'ɏ' && "–—‘’“”…·".IndexOf(c) < 0)) return null;
+        if (t.Length > 60) t = t[..60] is var cut && cut.LastIndexOf(' ') is > 20 and var sp ? cut[..sp] : cut;
+        return t;
+    }
 
     /// How long since the last keyboard or mouse input in this session; null when it cannot be read.
     public static TimeSpan? SinceInput()

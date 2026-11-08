@@ -32,6 +32,6 @@ public static class ContinueOn
     {
         if (s.Limit is { } l && l.At != default) remember(l.At);
         ResumeStopped.CopyTranscript(s, dir);
-        engine.LaunchConsole($"Claude · {target.ShortName} · continued", s.Cwd, Args(s, target.Number, restoreRc));
+        engine.LaunchConsole(RemoteControl.TitleOf(s.Transcript) ?? $"Claude · {target.ShortName} · continued", s.Cwd, Args(s, target.Number, restoreRc));
     }
 }

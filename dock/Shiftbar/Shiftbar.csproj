@@ -9,7 +9,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationIcon>dock.ico</ApplicationIcon>
     <AssemblyName>shiftbar</AssemblyName>
-    <Version>0.8.0</Version>
+    <Version>0.8.1</Version>
     <Product>Shiftbar</Product>
     <Copyright>Shiftbar contributors; engine (c) Onur Cetinkol, MIT</Copyright>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
