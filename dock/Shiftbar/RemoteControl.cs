@@ -138,14 +138,24 @@ public static class RemoteControl
     /// What `ConsoleNudge` types: `/remote-control <title>`, or the bare command when the session has no usable title.
     public static string Command(string? title) => title == null ? ConsoleNudge.Command : ConsoleNudge.Command + " " + title;
 
-    /// The name a session goes by: its `/rename` title, else the title Claude Code gave it. The Claude app and the terminal
-    /// tab already show that name; without it a reconnect is listed by its last message or a made-up name. Null when there
-    /// is none, or it holds characters that could not be typed and read back reliably (see `Typeable`).
-    public static string? TitleOf(string transcript)
+    /// The name a session goes by: its `/rename` title, else the fresh title Shiftbar made at the last switch
+    /// (`SessionTitles`), else the title Claude Code gave it. The Claude app and the terminal tab already show that name;
+    /// without it a reconnect is listed by its last message or a made-up name. Null when there is none, or it holds
+    /// characters that could not be typed and read back reliably (see `Typeable`). `titles`: the store (tests).
+    public static string? TitleOf(string transcript, SessionTitles? titles = null)
     {
+        var (customs, ai) = Titles(transcript);
+        titles ??= SessionTitles.Load();
+        var sid = Path.GetFileNameWithoutExtension(transcript);
+        return Typeable(titles.Renamed(sid, customs, ai)) ?? Typeable(titles.Current(sid)) ?? Typeable(ai);
+    }
+
+    /// The transcript's `custom-title` values, oldest first, and its newest `ai-title`.
+    internal static (List<string> Customs, string? Ai) Titles(string transcript)
+    {
+        var (customs, ai) = (new List<string>(), (string?)null);
         try
         {
-            string? custom = null, ai = null;
             foreach (var line in ResumeStopped.Tail(transcript, ScanBytes))
             {
                 var isCustom = line.Contains("\"custom-title\"", StringComparison.Ordinal);
@@ -154,14 +164,14 @@ public static class RemoteControl
                 {
                     using var doc = JsonDocument.Parse(line);
                     if (doc.RootElement.ValueKind != JsonValueKind.Object) continue;
-                    if (isCustom && Str(doc.RootElement, "type") == "custom-title") custom = Str(doc.RootElement, "customTitle") ?? custom;
+                    if (isCustom && Str(doc.RootElement, "type") == "custom-title" && Str(doc.RootElement, "customTitle") is { } c) customs.Add(c);
                     else if (Str(doc.RootElement, "type") == "ai-title") ai = Str(doc.RootElement, "aiTitle") ?? ai;
                 }
                 catch (JsonException) { } // a line cut by the tail window, or one being written
             }
-            return Typeable(custom) ?? Typeable(ai);
         }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return null; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        return (customs, ai);
     }
 
     /// `title` with runs of whitespace made one space and cut to 60 characters at a word, or null when empty or when it
@@ -311,6 +321,7 @@ public sealed class RcReconnect
 public sealed partial class TrayApp
 {
     readonly RcReconnect _rc = new();
+    readonly Dictionary<string, Task> _titling = []; // session → its fresh title being made
     int? _rcActive; // the default login as last observed, and its account uuid read at the same time
     string? _rcUuid;
     int _rcSwitch;
@@ -325,11 +336,11 @@ public sealed partial class TrayApp
         var uuid = RemoteControl.LoginUuid(); // read with the account number it goes with, at each change
         if (uuid == null && _rcActive != null && _rcActive != active) return; // unreadable now (being rewritten): the change is seen again next time
         if (_rcActive is { } was && was != active && uuid != null && _settings.ReconnectRemoteControl)
-            _ = RcQueueAsync(_rcUuid, uuid, ++_rcSwitch);
+            _ = RcQueueAsync(_rcUuid, uuid, ++_rcSwitch, active.Value);
         (_rcActive, _rcUuid) = (active, uuid);
     }
 
-    async Task RcQueueAsync(string? was, string now, int switchId)
+    async Task RcQueueAsync(string? was, string now, int switchId, int account)
     {
         try
         {
@@ -351,6 +362,8 @@ public sealed partial class TrayApp
                 return list;
             });
             var queued = found.Count(e => _rc.Queue(e, DateTime.UtcNow));
+            // A fresh name for each, from its latest prompts, typed with the reconnect (which waits for it, see RcTickAsync).
+            foreach (var e in found) _titling[e.SessionId] = SessionTitles.RefreshAsync(_engine, account, e.SessionId, e.Transcript);
             if (queued > 0) Program.Log($"remote control: {queued} window(s) to reconnect after switch {switchId}");
         }
         catch (Exception e) { Program.Log(e); }
@@ -379,7 +392,11 @@ public sealed partial class TrayApp
                     case RcReconnect.Step.Nudge when !_settings.ReconnectRemoteControl:
                         _rc.Later(e, DateTime.UtcNow);
                         break;
+                    case RcReconnect.Step.Nudge when _titling.TryGetValue(e.SessionId, out var titling) && !titling.IsCompleted:
+                        _rc.Later(e, DateTime.UtcNow); // its new name is still being made (at most a minute)
+                        break;
                     case RcReconnect.Step.Nudge:
+                        _titling.Remove(e.SessionId);
                         if (await Task.Run(() => RemoteControl.Ready(ResumeStopped.DefaultDir, e.Pid, e.SessionId, manual: false)) is { } why)
                         {
                             if (e.Why != why) Program.Log($"remote control: {e.SessionId} waiting ({why})");
