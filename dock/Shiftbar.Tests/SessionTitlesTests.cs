@@ -63,6 +63,10 @@ public class SessionTitlesTests
         Assert.EndsWith("1. fix login\n2. now billing", ask);
         Assert.DoesNotContain("current name", SessionTitles.Ask(["x"], null));
         Assert.Contains("2 to 4 words", ask);
+        Assert.Null(SessionTitles.TooLong("API Key Setup"));
+        Assert.Null(SessionTitles.TooLong("\"Fix the login page.\""));
+        Assert.Equal("API Key Setup for Individual Org", SessionTitles.TooLong("API Key Setup for Individual Org\nmore"));
+        Assert.Contains("\"API Key Setup for Individual Org\" has more than 4 words", SessionTitles.AskShorter(ask, "API Key Setup for Individual Org"));
     }
 
     [Fact]
