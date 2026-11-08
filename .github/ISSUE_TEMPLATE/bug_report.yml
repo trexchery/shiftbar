@@ -21,7 +21,7 @@ body:
     id: version
     attributes:
       label: Shiftbar version and Windows or macOS version
-      placeholder: Shiftbar 0.8.2, Windows 11 24H2
+      placeholder: Shiftbar 0.8.3, Windows 11 24H2
     validations:
       required: true
   - type: textarea

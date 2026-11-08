@@ -95,15 +95,20 @@ public sealed class SessionTitles
     public static string Ask(IReadOnlyList<string> prompts, string? current) =>
         "Name this Claude Code session. Below are the user's most recent requests in it, oldest first."
         + (current != null ? $" Its current name is \"{current}\"; keep it if it still fits." : "")
-        + " Reply with only a title of 2 to 6 words for what the session is about now: no quotes, no ending punctuation.\n\n"
+        + $" Reply with only a title of 2 to {MaxWords} words for what the session is about now: no quotes, no ending punctuation.\n\n"
         + string.Join("\n", prompts.Select((p, i) => $"{i + 1}. {p}"));
 
     /// Haiku's reply as a title: its first line without quotes, markdown or ending punctuation, then `Typeable`.
     public static string? Clean(string? reply)
     {
         var first = reply?.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
-        return RemoteControl.Typeable(first?.Trim('"', '\'', '*', '#', '`', '“', '”', ' ').TrimEnd('.', '!', ':', ' '));
+        return Short(RemoteControl.Typeable(first?.Trim('"', '\'', '*', '#', '`', '“', '”', ' ').TrimEnd('.', '!', ':', ' ')));
     }
+
+    /// Titles Shiftbar picks (Haiku's, or Claude's own as a fallback) are at most four words; the user's /rename is kept whole.
+    public const int MaxWords = 4;
+    public static string? Short(string? title) =>
+        title == null ? null : string.Join(' ', title.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(MaxWords)).TrimEnd(',', ';', ':', '-', '–', '—', ' ');
 
     /// Titles the session again from its latest prompts, on `account` (the default login). Nothing happens when the user
     /// renamed it, it has no typed prompts, or they are the ones it was last titled from. Never throws.
@@ -117,7 +122,7 @@ public sealed class SessionTitles
             if (prompts.Count == 0 || titles.Renamed(sessionId, customs, ai) != null) return;
             var basis = Basis(prompts);
             if (titles.Sessions.TryGetValue(sessionId, out var was) && was.Basis == basis) return;
-            if (Clean(await engine.TitleAsync(account, Ask(prompts, titles.Current(sessionId) ?? RemoteControl.Typeable(ai)))) is not { } title) return;
+            if (Clean(await engine.TitleAsync(account, Ask(prompts, titles.Current(sessionId) ?? Short(RemoteControl.Typeable(ai))))) is not { } title) return;
             await Gate.WaitAsync();
             try
             {

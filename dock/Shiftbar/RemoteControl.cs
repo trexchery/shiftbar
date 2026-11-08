@@ -147,7 +147,7 @@ public static class RemoteControl
         var (customs, ai) = Titles(transcript);
         titles ??= SessionTitles.Load();
         var sid = Path.GetFileNameWithoutExtension(transcript);
-        return Typeable(titles.Renamed(sid, customs, ai)) ?? Typeable(titles.Current(sid)) ?? Typeable(ai);
+        return Typeable(titles.Renamed(sid, customs, ai)) ?? SessionTitles.Short(Typeable(titles.Current(sid)) ?? Typeable(ai));
     }
 
     /// The transcript's `custom-title` values, oldest first, and its newest `ai-title`.
