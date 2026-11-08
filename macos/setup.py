@@ -7,7 +7,7 @@ from setuptools import setup
 ROOT = Path(__file__).resolve().parent.parent
 setup(
     name="Shiftbar",
-    version="0.8.2",
+    version="0.8.3",
     app=[str(ROOT / "macos" / "main.py")],
     options={
         "py2app": {
@@ -27,7 +27,7 @@ setup(
                 "CFBundleName": "Shiftbar",
                 "CFBundleDisplayName": "Shiftbar",
                 "CFBundleIdentifier": "com.shiftbar.app",
-                "CFBundleShortVersionString": "0.8.2",
+                "CFBundleShortVersionString": "0.8.3",
                 "LSUIElement": True,
                 "LSMinimumSystemVersion": "12.0",
                 "NSHighResolutionCapable": True,

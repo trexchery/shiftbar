@@ -62,6 +62,25 @@ public class SessionTitlesTests
         Assert.Contains("\"Login fix\"", ask);
         Assert.EndsWith("1. fix login\n2. now billing", ask);
         Assert.DoesNotContain("current name", SessionTitles.Ask(["x"], null));
+        Assert.Contains("2 to 4 words", ask);
+    }
+
+    [Fact]
+    public void ShiftbarsTitlesAreAtMostFourWordsButARenameIsKeptWhole()
+    {
+        Assert.Equal("Fixing invoice PDF totals", SessionTitles.Clean("Fixing invoice PDF totals and footer"));
+        Assert.Equal("Fix login and billing", SessionTitles.Short("Fix login and billing, then export")); // no dangling comma
+        Assert.Equal("Login page fix", SessionTitles.Short("Login page fix"));
+        Assert.Equal("Drill desk setup", SessionTitles.Short("Drill desk setup - and more"));
+        using var t = new TempDir();
+        var f = Path.Combine(t.Path, "s1.jsonl");
+        var store = new SessionTitles();
+        File.WriteAllLines(f, [Ai("Drill Desk setup and product realignment")]);
+        Assert.Equal("Drill Desk setup and", RemoteControl.TitleOf(f, store)); // Claude's own title, cut
+        store.Record("s1", "An older six word stored title", "b", DateTime.UtcNow);
+        Assert.Equal("An older six word", RemoteControl.TitleOf(f, store)); // one stored before the cap, cut
+        File.AppendAllLines(f, [Custom("Session auto-rename and PowerShell tab naming")]);
+        Assert.Equal("Session auto-rename and PowerShell tab naming", RemoteControl.TitleOf(f, store));
     }
 
     [Fact]
