@@ -56,6 +56,14 @@ Shiftbar is built on claude-swap's credential and usage engine. Everything stays
 2. **Sign in.** In each profile, sign in to claude.ai and to the Claude extension with that account.
 3. **Turn it on.** In Shiftbar's settings, turn on **Open each account's browser profile** and pick the browser. To use a profile with another name, pick it under **Browser profile** in the account's **More** menu (on macOS, under **Account tools**).
 
+**Tab tags (optional, Windows):** to start each Claude Code tab title with the window's short name (`drill-desk-74` → `74 ✳ Fix the login page`), set a user environment variable and open new Claude Code windows:
+
+```powershell
+[Environment]::SetEnvironmentVariable('BUN_OPTIONS', '--preload ' + "$env:LOCALAPPDATA\Programs\shiftbar\tabtag.js".Replace('\', '/'), 'User')
+```
+
+Point it at the `tabtag.js` beside `shiftbar.exe`, and use a folder path with no spaces. Claude Code will not start while the file it points to is missing, so remove the variable before you move or delete Shiftbar.
+
 ## What's inside
 
 <table>

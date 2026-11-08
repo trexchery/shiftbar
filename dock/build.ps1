@@ -29,6 +29,7 @@ try {
     Copy-Item (Join-Path $work 'dist\cswap') (Join-Path $out 'engine') -Recurse
     Copy-Item LICENSE (Join-Path $out 'LICENSE.txt')
     Copy-Item README.md (Join-Path $out 'README.md')
+    Copy-Item dock\tabtag.js (Join-Path $out 'tabtag.js') # the opt-in tab tag (BUN_OPTIONS preload): always shipped, never missing
 
     $engine = Join-Path $out 'engine\cswap.exe'
     & $engine --version
