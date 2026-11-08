@@ -149,6 +149,48 @@ public class RemoteControlTests
         Assert.Equal(["--resume", "s1", "--rc"], RemoteControl.WithRc(["--resume", "s1", "--rc"], with, on: true));
         var s = new StoppedSession(1, "s1", @"C:\w", @"C:\cfg", 1, with);
         Assert.Equal(["run", "2", "--restore-rc", "--", "--resume", "s1", ResumeStopped.Prompt, "--remote-control"], ContinueOn.Args(s, 2, restoreRc: true));
+        var named = Path.Combine(t.Path, "named.jsonl");
+        File.WriteAllLines(named, [Bridge(A), AiTitle("Fix the login page"), Done]);
+        Assert.Equal([.. resume, "--remote-control=Fix the login page"], RemoteControl.WithRc(resume, named, on: true)); // keeps its name
+    }
+
+    static string AiTitle(string t) => JsonSerializer.Serialize(new { type = "ai-title", aiTitle = t, sessionId = "s1" });
+    static string CustomTitle(string t) => JsonSerializer.Serialize(new { type = "custom-title", customTitle = t, sessionId = "s1" });
+
+    [Fact]
+    public void TheTitleIsTheRenameElseClaudesOwnAndTheNewestWins()
+    {
+        using var t = new TempDir();
+        var f = Path.Combine(t.Path, "s.jsonl");
+        File.WriteAllLines(f, [Typed, Done]);
+        Assert.Null(RemoteControl.TitleOf(f));
+        Assert.Null(RemoteControl.TitleOf(Path.Combine(t.Path, "missing.jsonl")));
+        File.WriteAllLines(f, [AiTitle("Old title"), Typed, AiTitle("Shiftbar switching issues"), Done]);
+        Assert.Equal("Shiftbar switching issues", RemoteControl.TitleOf(f));
+        File.WriteAllLines(f, [CustomTitle("My grid tool"), AiTitle("Shiftbar switching issues"), "{\"type\":\"ai-ti", Done]); // a cut line is skipped
+        Assert.Equal("My grid tool", RemoteControl.TitleOf(f)); // a /rename beats Claude's title even when older
+        File.WriteAllLines(f, [CustomTitle("🚀 launch"), AiTitle("Launch plan")]);
+        Assert.Equal("Launch plan", RemoteControl.TitleOf(f)); // an untypeable rename falls back to Claude's title
+        // A user message that merely mentions the record type is no title.
+        File.WriteAllLines(f, ["""{"type":"user","message":{"role":"user","content":"what is \"custom-title\"?"}}"""]);
+        Assert.Null(RemoteControl.TitleOf(f));
+    }
+
+    [Fact]
+    public void OnlyATitleThatCanBeTypedAndReadBackIsUsed()
+    {
+        Assert.Equal("Fix the login page", RemoteControl.Typeable("  Fix the\tlogin\n page "));
+        Assert.Equal("Café – résumé “draft”", RemoteControl.Typeable("Café – résumé “draft”"));
+        Assert.Equal("Say 'hi'", RemoteControl.Typeable("Say \"hi\"")); // never a " in a console command line
+        Assert.Null(RemoteControl.Typeable(null));
+        Assert.Null(RemoteControl.Typeable("   "));
+        Assert.Null(RemoteControl.Typeable("Launch 🚀"));
+        Assert.Null(RemoteControl.Typeable("日本語のタイトル"));
+        Assert.Null(RemoteControl.Typeable("bell\u0007"));
+        var cut = RemoteControl.Typeable(string.Join(' ', Enumerable.Repeat("word", 30)))!;
+        Assert.True(cut.Length <= 60 && !cut.EndsWith(' ') && cut.EndsWith("word"));
+        Assert.Equal("/remote-control", RemoteControl.Command(null));
+        Assert.Equal("/remote-control Fix the login page", RemoteControl.Command("Fix the login page"));
     }
 
     [Fact]

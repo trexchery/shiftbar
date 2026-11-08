@@ -144,24 +144,29 @@ public static class ConsoleNudge
         if (con.Read() is not { } s) return "refused unreadable";
         var box = Parse(s.Rows, s.Width, s.Attrs, cursorRow: s.CursorRow);
         if (box.State != BoxState.Empty) return "refused " + (box.State == BoxState.Text ? "not-empty" : "unrecognised");
+        // The session keeps its name in the Claude app: its title goes with the command, when the whole line fits on one
+        // row of the prompt (a wrapped line could not be read back as typed).
+        var title = ResumeStopped.TranscriptOf(dir, sid, "") is { } t ? RemoteControl.TitleOf(t) : null;
+        var cmd = RemoteControl.Command(title);
+        if (cmd.Length + 8 > s.Width) cmd = Command;
         if (RemoteControl.Ready(dir, pid, sid, manual) is { } late) return "refused " + late; // right before typing
-        var written = con.Type(Command);
+        var written = con.Type(cmd);
         if (written == 0) return "refused write-failed";
-        var after = WaitFor(con, b => b.Text == Command);
-        if (written != Command.Length * 2 || after?.Text != Command)
+        var after = WaitFor(con, b => b.Text == cmd);
+        if (written != cmd.Length * 2 || after?.Text != cmd)
             return after?.State == BoxState.Empty && con.Pending() ? "left pending-input"
-                : "left " + (after == null ? "unreadable" : after.Text.StartsWith(Command) ? "mismatch-after-command" : "mismatch");
-        if (RemoteControl.Ready(dir, pid, sid, manual) is { } changed) return Remove(con, changed);
+                : "left " + (after == null ? "unreadable" : after.Text.StartsWith(cmd) ? "mismatch-after-command" : "mismatch");
+        if (RemoteControl.Ready(dir, pid, sid, manual) is { } changed) return Remove(con, cmd, changed);
         // Ready reads files for a while: the box is read once more, with nothing slow between this and Enter.
         if (con.Read() is not { } last) return "left unreadable";
-        if (Parse(last.Rows, last.Width, typed: true).Text != Command) return "left mismatch";
-        return con.Key('\r', 0x0D) ? "sent" : Remove(con, "enter-failed");
+        if (Parse(last.Rows, last.Width, typed: true).Text != cmd) return "left mismatch";
+        return con.Key('\r', 0x0D) ? "sent" : Remove(con, cmd, "enter-failed");
     }
 
     /// Takes our characters out of a box that holds exactly them.
-    static string Remove(Attached con, string why)
+    static string Remove(Attached con, string cmd, string why)
     {
-        con.Backspaces(Command.Length);
+        con.Backspaces(cmd.Length);
         return WaitFor(con, b => b.State == BoxState.Empty)?.State == BoxState.Empty ? "aborted " + why : "left " + why;
     }
 
