@@ -72,11 +72,13 @@ public class SessionTitlesTests
         Assert.Equal("Fix login and billing", SessionTitles.Short("Fix login and billing, then export")); // no dangling comma
         Assert.Equal("Login page fix", SessionTitles.Short("Login page fix"));
         Assert.Equal("Drill desk setup", SessionTitles.Short("Drill desk setup - and more"));
+        Assert.Equal("API Key Setup", SessionTitles.Short("API Key Setup for Individual Org")); // no dangling joiner
+        Assert.Equal("Fix login", SessionTitles.Short("Fix login and the billing page"));
         using var t = new TempDir();
         var f = Path.Combine(t.Path, "s1.jsonl");
         var store = new SessionTitles();
         File.WriteAllLines(f, [Ai("Drill Desk setup and product realignment")]);
-        Assert.Equal("Drill Desk setup and", RemoteControl.TitleOf(f, store)); // Claude's own title, cut
+        Assert.Equal("Drill Desk setup", RemoteControl.TitleOf(f, store)); // Claude's own title, cut, no dangling "and"
         store.Record("s1", "An older six word stored title", "b", DateTime.UtcNow);
         Assert.Equal("An older six word", RemoteControl.TitleOf(f, store)); // one stored before the cap, cut
         File.AppendAllLines(f, [Custom("Session auto-rename and PowerShell tab naming")]);
