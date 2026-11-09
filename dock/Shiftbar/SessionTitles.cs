@@ -93,9 +93,9 @@ public sealed class SessionTitles
 
     /// What Haiku is asked. The current name goes with it, so a session still on the same work keeps its name.
     public static string Ask(IReadOnlyList<string> prompts, string? current) =>
-        "Name this Claude Code session. Below are the user's most recent requests in it, oldest first."
+        $"Write a 4-{MaxWords} word summary of what this Claude Code session is about now, from the user's most recent requests in it below, oldest first."
         + (current != null ? $" Its current name is \"{current}\"; keep it if it still fits." : "")
-        + $" Reply with only a title of 2 to {MaxWords} words (never more than {MaxWords}) for what the session is about now: no quotes, no ending punctuation.\n\n"
+        + " Reply with only the summary: no quotes, no ending punctuation.\n\n"
         + string.Join("\n", prompts.Select((p, i) => $"{i + 1}. {p}"));
 
     /// The follow-up when Haiku's title was too long: the same request, told what it got wrong.
@@ -105,7 +105,7 @@ public sealed class SessionTitles
     /// Haiku's reply as a title: its first line without quotes, markdown or ending punctuation, then `Typeable`.
     public static string? Clean(string? reply) => Short(Uncut(reply));
 
-    /// `Clean` before the four-word cut, so a too-long reply can be noticed and asked again.
+    /// `Clean` before the five-word cut, so a too-long reply can be noticed and asked again.
     static string? Uncut(string? reply)
     {
         var first = reply?.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
@@ -116,11 +116,11 @@ public sealed class SessionTitles
     public static string? TooLong(string? reply) =>
         Uncut(reply) is { } t && t.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length > MaxWords ? t : null;
 
-    /// Titles Shiftbar picks (Haiku's, or Claude's own as a fallback) are at most four words; the user's /rename is kept whole.
+    /// Titles Shiftbar picks (Haiku's, or Claude's own as a fallback) are at most five words; the user's /rename is kept whole.
     /// A cut never ends on a joining word ("API Key Setup for"), nor on a dash or comma.
-    public const int MaxWords = 4;
+    public const int MaxWords = 5;
     static readonly HashSet<string> Joiners = new(StringComparer.OrdinalIgnoreCase)
-        { "a", "an", "the", "and", "or", "of", "for", "to", "in", "on", "at", "by", "with", "from", "into", "via", "vs", "&", "-", "–", "—" };
+        { "a", "an", "the", "and", "or", "then", "of", "for", "to", "in", "on", "at", "by", "with", "from", "into", "via", "vs", "&", "-", "–", "—" };
     public static string? Short(string? title)
     {
         if (title == null) return null;

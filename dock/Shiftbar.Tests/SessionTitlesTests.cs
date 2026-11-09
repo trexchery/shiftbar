@@ -62,29 +62,29 @@ public class SessionTitlesTests
         Assert.Contains("\"Login fix\"", ask);
         Assert.EndsWith("1. fix login\n2. now billing", ask);
         Assert.DoesNotContain("current name", SessionTitles.Ask(["x"], null));
-        Assert.Contains("2 to 4 words", ask);
-        Assert.Null(SessionTitles.TooLong("API Key Setup"));
+        Assert.StartsWith("Write a 4-5 word summary of ", ask);
+        Assert.Null(SessionTitles.TooLong("API Key Billing Setup Guide"));
         Assert.Null(SessionTitles.TooLong("\"Fix the login page.\""));
         Assert.Equal("API Key Setup for Individual Org", SessionTitles.TooLong("API Key Setup for Individual Org\nmore"));
-        Assert.Contains("\"API Key Setup for Individual Org\" has more than 4 words", SessionTitles.AskShorter(ask, "API Key Setup for Individual Org"));
+        Assert.Contains("\"API Key Setup for Individual Org\" has more than 5 words", SessionTitles.AskShorter(ask, "API Key Setup for Individual Org"));
     }
 
     [Fact]
-    public void ShiftbarsTitlesAreAtMostFourWordsButARenameIsKeptWhole()
+    public void ShiftbarsTitlesAreAtMostFiveWordsButARenameIsKeptWhole()
     {
-        Assert.Equal("Fixing invoice PDF totals", SessionTitles.Clean("Fixing invoice PDF totals and footer"));
-        Assert.Equal("Fix login and billing", SessionTitles.Short("Fix login and billing, then export")); // no dangling comma
+        Assert.Equal("Fixing invoice PDF totals", SessionTitles.Clean("Fixing invoice PDF totals and footer layout"));
+        Assert.Equal("Fix login and billing", SessionTitles.Short("Fix login and billing, then export")); // no dangling comma or "then"
         Assert.Equal("Login page fix", SessionTitles.Short("Login page fix"));
         Assert.Equal("Drill desk setup", SessionTitles.Short("Drill desk setup - and more"));
-        Assert.Equal("API Key Setup", SessionTitles.Short("API Key Setup for Individual Org")); // no dangling joiner
-        Assert.Equal("Fix login", SessionTitles.Short("Fix login and the billing page"));
+        Assert.Equal("API Key Setup", SessionTitles.Short("API Key Setup for the Individual Org")); // no dangling joiners
+        Assert.Equal("Fix login", SessionTitles.Short("Fix login and the the billing page"));
         using var t = new TempDir();
         var f = Path.Combine(t.Path, "s1.jsonl");
         var store = new SessionTitles();
-        File.WriteAllLines(f, [Ai("Drill Desk setup and product realignment")]);
-        Assert.Equal("Drill Desk setup", RemoteControl.TitleOf(f, store)); // Claude's own title, cut, no dangling "and"
-        store.Record("s1", "An older six word stored title", "b", DateTime.UtcNow);
-        Assert.Equal("An older six word", RemoteControl.TitleOf(f, store)); // one stored before the cap, cut
+        File.WriteAllLines(f, [Ai("Drill Desk setup check and product realignment")]);
+        Assert.Equal("Drill Desk setup check", RemoteControl.TitleOf(f, store)); // Claude's own title, cut, no dangling "and"
+        store.Record("s1", "An older seven word stored title here", "b", DateTime.UtcNow);
+        Assert.Equal("An older seven word stored", RemoteControl.TitleOf(f, store)); // one stored before the cap, cut
         File.AppendAllLines(f, [Custom("Session auto-rename and PowerShell tab naming")]);
         Assert.Equal("Session auto-rename and PowerShell tab naming", RemoteControl.TitleOf(f, store));
     }
