@@ -6,8 +6,8 @@ namespace Shiftbar.Tests;
 /// Synthetic transcripts, journals and agent files, shaped like Claude Code 2.1.3xx's: a window that launched a workflow
 /// ends its turn (`end_turn`, then a `turn_duration` line counting the pending run) and writes nothing more; each agent's
 /// file ends at the API's refusal; the run's journal has `launched`, a `started` per agent and a `result` only for an agent
-/// that came back; `<session>/workflows/<run>.json` appears when the run settles. Stamps are relative to now: the staged
-/// files are written now, and a stop must be the live process's own.
+/// that came back; `<session>/workflows/<run>.json` appears when the run settles. Every value is invented. Stamps are
+/// relative to now: the staged files are written now, and a stop must be the live process's own.
 public class CarryOnTests : IDisposable
 {
     readonly TempDir _t = new();
@@ -25,9 +25,9 @@ public class CarryOnTests : IDisposable
     AgentStop? Stop(string status = "busy") => CarryOn.StopOf(Window(status), Later);
 
     static string At(DateTimeOffset t) => t.ToString("O");
-    static string Asked(DateTimeOffset t, string text = "Make the film.") => $$$"""{"type":"user","timestamp":"{{{At(t)}}}","message":{"role":"user","content":"{{{text}}}"}}""";
+    static string Asked(DateTimeOffset t, string text = "Run the checks.") => $$$"""{"type":"user","timestamp":"{{{At(t)}}}","message":{"role":"user","content":"{{{text}}}"}}""";
     static string Done(DateTimeOffset t) => $$$"""{"type":"assistant","timestamp":"{{{At(t)}}}","message":{"role":"assistant","model":"claude-fable-5-2","stop_reason":"end_turn","content":[{"type":"text","text":"The workflow is running; I will report when it settles."}]}}""";
-    static string TurnTime(DateTimeOffset t) => $$$"""{"type":"system","subtype":"turn_duration","durationMs":647840,"pendingWorkflowCount":1,"timestamp":"{{{At(t)}}}"}""";
+    static string TurnTime(DateTimeOffset t) => $$$"""{"type":"system","subtype":"turn_duration","durationMs":1000,"pendingWorkflowCount":1,"timestamp":"{{{At(t)}}}"}""";
     /// A slash command as 2.1.3xx records it, and its (empty) output line.
     static string[] Command(string name, DateTimeOffset t) =>
     [
@@ -45,20 +45,28 @@ public class CarryOnTests : IDisposable
     static string Tool(string agent, DateTimeOffset t) => $$$"""{"isSidechain":true,"agentId":"{{{agent}}}","type":"assistant","timestamp":"{{{At(t)}}}","message":{"role":"assistant","model":"claude-fable-5-2","stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{}}]}}""";
     static string ToolResult(string agent, DateTimeOffset t) => $$$"""{"isSidechain":true,"agentId":"{{{agent}}}","type":"user","timestamp":"{{{At(t)}}}","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"ok"}]}}""";
     static string Request(string agent, DateTimeOffset t) => $$$"""{"type":"api-request","agentId":"{{{agent}}}","timestamp":"{{{At(t)}}}","querySource":"agent:builtin:workflow-subagent"}""";
-    static string Refused(string agent, DateTimeOffset t) => $$$"""{"isSidechain":true,"agentId":"{{{agent}}}","type":"assistant","timestamp":"{{{At(t)}}}","apiError":"usage_limit_reached","apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":{{{Reset.ToUnixTimeSeconds()}}},"rateLimitType":"five_hour"}},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429,"message":{"role":"assistant","model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"You've hit your 5-hour limit · resets 3:40am (America/Chicago)"}]}}""";
+    static string Refused(string agent, DateTimeOffset t) => $$$"""{"isSidechain":true,"agentId":"{{{agent}}}","type":"assistant","timestamp":"{{{At(t)}}}","apiError":"usage_limit_reached","apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":{{{Reset.ToUnixTimeSeconds()}}},"rateLimitType":"five_hour"}},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429,"message":{"role":"assistant","model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"You've hit your 5-hour limit · resets 2:00am (UTC)"}]}}""";
     /// An agent's file that ends at the refusal: its last tool result, the request, the error.
     static string[] Dead(string agent, DateTimeOffset t) => [Tool(agent, t.AddSeconds(-9)), ToolResult(agent, t.AddSeconds(-1)), Request(agent, t), Refused(agent, t)];
 
-    static string Started(string agent) => $$$"""{"type":"started","key":"v2:k-{{{agent}}}","agentId":"{{{agent}}}","label":"picture:layout","phase":"Layout"}""";
-    static string Result(string agent) => $$$"""{"type":"result","key":"v2:k-{{{agent}}}","agentId":"{{{agent}}}","result":{"ok":true},"toolsUsed":["Bash"]}""";
+    /// `step`: the agent whose step this one takes up again (a run restarts a refused agent under the old key).
+    static string Started(string agent, string? step = null) => $$$"""{"type":"started","key":"v2:k-{{{step ?? agent}}}","agentId":"{{{agent}}}","label":"build:step","phase":"Build"}""";
+    static string Result(string agent, string? step = null) => $$$"""{"type":"result","key":"v2:k-{{{step ?? agent}}}","agentId":"{{{agent}}}","result":{"ok":true},"toolsUsed":["Bash"]}""";
 
     void Main(params string[] lines) { Directory.CreateDirectory(Project); File.WriteAllLines(Transcript, lines); }
     void Journal(string run, params string[] lines) { Directory.CreateDirectory(RunDir(run)); File.WriteAllLines(Path.Combine(RunDir(run), "journal.jsonl"), ["""{"type":"launched"}""", .. lines]); }
     void Agent(string run, string agent, params string[] lines) => File.WriteAllLines(Path.Combine(RunDir(run), $"agent-{agent}.jsonl"), lines);
+    string Snapshot(string run) => Path.Combine(Project, "sid", "workflows", run + ".json");
     void Settle(string run)
     {
         Directory.CreateDirectory(Path.Combine(Project, "sid", "workflows"));
-        File.WriteAllText(Path.Combine(Project, "sid", "workflows", run + ".json"), """{"status":"killed"}""");
+        File.WriteAllText(Snapshot(run), """{"status":"killed"}""");
+    }
+    string Plain(string agent, params string[] lines)
+    {
+        var file = Path.Combine(Project, "sid", "subagents", $"agent-{agent}.jsonl");
+        File.WriteAllLines(file, lines);
+        return file;
     }
 
     /// The reported case: the window ended its turn with one run pending, then the run's two agents each ended at the limit.
@@ -70,11 +78,18 @@ public class CarryOnTests : IDisposable
         Agent("wf_x", "a2", Dead("a2", Stop2));
     }
 
-    static Account A(int n, double five, bool active = false, DateTimeOffset? resets = null, string status = "ok", bool disabled = false) =>
-        new(n, $"user{n}@example.com", active, status, status == "ok" ? new Usage(new Window(five, resets), new Window(10, null), null, null) : null, Disabled: disabled);
+    static Account A(int n, double five, bool active = false, DateTimeOffset? resets = null, string status = "ok", bool disabled = false, double? fable = null) =>
+        new(n, $"user{n}@example.com", active, status, status == "ok" ? new Usage(new Window(five, resets), new Window(10, null), fable is { } f ? [new Window(f, null, "Fable")] : null, null) : null, Disabled: disabled);
     static readonly Dictionary<int, DateTimeOffset> NoneRefused = [];
     static readonly Dictionary<(int, string), DateTimeOffset> NoScope = [];
     static AgentStop StopAt(DateTimeOffset at, DateTimeOffset? resets, params string[] runs) => new(new Limit("five_hour", resets, at), runs, "claude-fable-5-2");
+    /// A live window's record: this test process, as Claude Code writes `sessions/<pid>.json`.
+    void Live(string sid)
+    {
+        using var self = System.Diagnostics.Process.GetCurrentProcess();
+        Directory.CreateDirectory(Path.Combine(_t.Path, "sessions"));
+        File.WriteAllText(Path.Combine(_t.Path, "sessions", "1.json"), $$"""{"pid":{{self.Id}},"sessionId":"{{sid}}","procStart":"{{self.StartTime.ToUniversalTime().ToFileTimeUtc()}}"}""");
+    }
 
     [Fact]
     public void TonightsWindowIsToldOnceItsLoginHasRoomAgain()
@@ -121,7 +136,7 @@ public class CarryOnTests : IDisposable
         Assert.Null(Stop("waiting")); // a permission prompt is open
         Assert.Null(CarryOn.StopOf(Window(), DateTime.UtcNow.AddSeconds(100))); // something in the session was written under two minutes ago
 
-        Main(Asked(Reply.AddMinutes(-10)), Done(Reply), Asked(Reply.AddMinutes(1), "And the sound."), Tool("main", Reply.AddMinutes(2)));
+        Main(Asked(Reply.AddMinutes(-10)), Done(Reply), Asked(Reply.AddMinutes(1), "And the rest."), Tool("main", Reply.AddMinutes(2)));
         Assert.Null(Stop()); // its main loop is in a tool call
         Tonight();
 
@@ -144,6 +159,65 @@ public class CarryOnTests : IDisposable
     }
 
     [Fact]
+    public void AWindowWithAPlainSubagentStillWorkingIsNeverTold()
+    {
+        Tonight();
+        var file = Plain("p1", Tool("p1", Stop2.AddMinutes(1)));
+        Assert.Null(Stop()); // mid-tool (a long build): silent for minutes, and not stopped
+        Plain("p1", Asked(Stop2.AddMinutes(1)));
+        Assert.Null(Stop()); // just started, or waiting for the API
+        Plain("p1", Tool("p1", Stop2.AddMinutes(1)), ToolResult("p1", Stop2.AddMinutes(2)), Done(Stop2.AddMinutes(3)));
+        Assert.NotNull(Stop()); // it finished its reply
+        Plain("p1", Tool("p1", Stop2.AddMinutes(1)));
+        File.SetLastWriteTimeUtc(file, Later - CarryOn.Working);
+        Assert.NotNull(Stop()); // killed mid-tool long ago: it does not hold the window for good
+
+        // Plain subagents only: one the limit stopped, a sibling still at work.
+        Directory.Delete(RunDir("wf_x"), true);
+        Plain("b1", Dead("b1", Stop1));
+        Assert.NotNull(Stop());
+        Plain("p1", Tool("p1", Stop2));
+        Assert.Null(Stop());
+    }
+
+    [Fact]
+    public void ARunStillGoingUnderAnotherSessionIdOfTheFolderHoldsTheLine()
+    {
+        Tonight();
+        var old = Path.Combine(Project, "old-sid", "subagents", "workflows", "wf_o");
+        Directory.CreateDirectory(old);
+        var journal = Path.Combine(old, "journal.jsonl");
+        File.WriteAllLines(journal, [Started("o1")]);
+        Assert.Null(Stop()); // the window ran /clear while wf_o was going: it still writes under the old id
+        Live("old-sid");
+        Assert.NotNull(Stop()); // another live window's run is not this one's
+        Directory.Delete(Path.Combine(_t.Path, "sessions"), true);
+        File.SetLastWriteTimeUtc(journal, Later - CarryOn.Working);
+        Assert.NotNull(Stop()); // nothing written there for long: a dead window's run
+        File.SetLastWriteTimeUtc(journal, DateTime.UtcNow);
+        Directory.CreateDirectory(Path.Combine(Project, "old-sid", "workflows"));
+        File.WriteAllText(Path.Combine(Project, "old-sid", "workflows", "wf_o.json"), "{}");
+        Assert.NotNull(Stop()); // settled
+    }
+
+    [Fact]
+    public void ARunResumedUnderItsOwnIdIsRunningAgainWhateverItsOldSnapshotSays()
+    {
+        // wf_x settled once (killed), then was resumed under the same id: the old snapshot stays while the journal goes on.
+        Tonight();
+        Settle("wf_x");
+        File.SetLastWriteTimeUtc(Snapshot("wf_x"), Stop1.UtcDateTime.AddMinutes(-30));
+        Assert.NotNull(Stop()); // its new agents ended at the limit: a stop, not a settled run
+        Assert.Equal("wf_x", Assert.Single(ResumeStopped.RunningWorkflows(Project, Reply.UtcDateTime)).RunId);
+
+        Agent("wf_x", "a1", Tool("a1", Stop1));
+        Assert.Null(Stop()); // and one of them mid-tool: alive
+        Settle("wf_x");
+        Assert.Null(Stop()); // settled again: the snapshot is rewritten after the journal
+        Assert.Empty(ResumeStopped.RunningWorkflows(Project, Reply.UtcDateTime));
+    }
+
+    [Fact]
     public void AWindowSomeoneTypedIntoSinceTheStopIsNeverTold()
     {
         string[] turn = [Asked(Reply.AddMinutes(-10)), Done(Reply), TurnTime(Reply.AddSeconds(3))];
@@ -156,6 +230,8 @@ public class CarryOnTests : IDisposable
         Assert.Null(Stop()); // a slash command typed since: someone is at that window
         Main([.. turn, """{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>"}}"""]);
         Assert.Null(Stop()); // the same as older versions wrote it, and unstamped: counted as just now
+        Main([.. turn, .. Command("usage", Stop1.AddMinutes(2))]);
+        Assert.Null(Stop()); // typed after the first agent stopped and before the last one did
         Main([.. turn, .. Command("usage", Stop1.AddMinutes(-5))]);
         Assert.NotNull(Stop()); // a look before the agents stopped is not since the stop
         Main([.. turn, .. Reconnect(Stop2.AddMinutes(14))]);
@@ -176,11 +252,18 @@ public class CarryOnTests : IDisposable
         Agent("wf_x", "a3", Dead("a3", Stop2.AddMinutes(4)));
         Assert.Equal(Stop2.AddMinutes(4), Stop()!.Limit.At); // which the limit stopped too: a1 and a3 are what is open
 
+        // After the reset the run starts the refused steps again by itself, under new agent ids: the old ones are closed.
+        Journal("wf_x", Started("a1"), Started("a2"), Started("a4", step: "a1"), Result("a4", step: "a1"), Started("a5", step: "a2"));
+        Agent("wf_x", "a5", Tool("a5", Stop2.AddMinutes(30)));
+        Assert.Null(Stop()); // a2's step is at work again
+        Journal("wf_x", Started("a1"), Started("a2"), Started("a4", step: "a1"), Result("a4", step: "a1"), Started("a5", step: "a2"), Result("a5", step: "a2"));
+        Assert.Null(Stop()); // both came back: between agents, though a1 and a2 never got a line again
+
         Settle("wf_x");
         Assert.Null(Stop()); // settled (the window's user stopped or restarted it)
 
         Tonight();
-        File.Delete(Path.Combine(Project, "sid", "workflows", "wf_x.json"));
+        File.Delete(Snapshot("wf_x"));
         Assert.NotNull(Stop());
         Assert.Null(CarryOn.StopOf(Window(started: Stop2.UtcDateTime.AddMinutes(5)), Later)); // a session resumed in a new process: the old stop is not its own
         Assert.Null(CarryOn.StopOf(Window(started: DateTime.UtcNow.AddMinutes(1)), Later)); // nor is a run whose journal is older than the window
@@ -234,8 +317,9 @@ public class CarryOnTests : IDisposable
 
         Assert.True(Room(A(2, 3), refuser: 1)); // another account than the one that refused, with room
         Assert.False(Room(A(1, 3), refuser: 1)); // the refuser itself, its reset ahead, whatever a stale reading says
-        Assert.True(Room(A(1, 3), refuser: 1, now: Reset.AddSeconds(1))); // the reset has passed, with no switch at all
-        Assert.False(Room(A(1, 100, resets: Reset), refuser: 1, now: Reset.AddSeconds(1))); // passed, but the reading is not fresh yet
+        Assert.False(Room(A(1, 3), refuser: 1, now: Reset.AddMinutes(2))); // just past its reset: Claude Code restarts a parked run by itself then
+        Assert.True(Room(A(1, 3), refuser: 1, now: Reset + CarryOn.SelfRetry)); // well past it and still stopped, with no switch at all
+        Assert.False(Room(A(1, 100, resets: Reset), refuser: 1, now: Reset + CarryOn.SelfRetry)); // passed, but the reading is not fresh yet
         Assert.False(Room(A(2, 96), refuser: 1)); // at its switch line: the login is about to leave it
         Assert.False(Room(A(2, 3), refuser: 1, refused: new() { [2] = Now.AddHours(1) })); // the API refused it since, until a reset ahead
         Assert.True(Room(A(2, 3), refuser: 1, refused: new() { [2] = Now.AddHours(-1) }));
@@ -247,6 +331,12 @@ public class CarryOnTests : IDisposable
         Assert.False(Room(A(2, 3), refuser: null)); // who refused is not known, and the login has not moved since
         Assert.True(Room(A(2, 3), refuser: null, moved: true)); // not known, but the login moved after the stop
         Assert.False(CarryOn.Room(A(1, 3), StopAt(Stop2, null), 1, false, 95, Now.AddDays(1), NoneRefused, NoScope)); // a refusal with no reset time never passes
+
+        // An agent refused on its first request names no model: every model's window and refusal counts.
+        var unknown = stop with { Model = null };
+        Assert.False(CarryOn.Room(A(2, 3, fable: 100), unknown, 1, false, 95, Now, NoneRefused, NoScope));
+        Assert.False(CarryOn.Room(A(2, 3), unknown, 1, false, 95, Now, NoneRefused, new Dictionary<(int, string), DateTimeOffset> { [(2, "Opus")] = Now.AddHours(1) }));
+        Assert.True(CarryOn.Room(A(2, 3, fable: 40), unknown, 1, false, 95, Now, NoneRefused, new Dictionary<(int, string), DateTimeOffset> { [(2, "Opus")] = Now.AddHours(-1) }));
     }
 
     [Fact]
@@ -264,6 +354,52 @@ public class CarryOnTests : IDisposable
         Assert.Equal(CarryOn.Told, CarryOn.Hold(true, told, key, room: true));
         Assert.Null(CarryOn.Hold(true, told, CarryOn.Key("sid", StopAt(Now, Reset)), room: true)); // the same window stopped again later: a new stop
         Assert.Null(CarryOn.Hold(true, told, CarryOn.Key("other", StopAt(Stop2, Reset)), room: true));
+    }
+
+    [Fact]
+    public void AStopWhoseWorkWentOnInAnotherWindowIsLeftAlone()
+    {
+        var (stop, s) = (StopAt(Stop2, Reset), Window());
+        Dictionary<string, DateTime> none = [];
+        Assert.False(CarryOn.Elsewhere(none, [s, s with { Pid = 7, SessionId = "other" }], s, stop));
+        Assert.True(CarryOn.Elsewhere(new Dictionary<string, DateTime> { ["sid#1"] = Stop2.UtcDateTime.AddMinutes(1) }, [s], s, stop)); // "Continue on #1" after the stop
+        Assert.False(CarryOn.Elsewhere(new Dictionary<string, DateTime> { ["sid#1"] = Stop2.UtcDateTime.AddMinutes(-1), ["sid2#1"] = Now.UtcDateTime }, [s], s, stop)); // reopened before it; another session
+        Assert.True(CarryOn.Elsewhere(none, [s, s with { Pid = 7, ConfigDir = "elsewhere" }], s, stop)); // a second live claude holds the session
+    }
+
+    [Fact]
+    public void TheLineWaitsWhileTheLoginIsJustMoving()
+    {
+        var now = Now.UtcDateTime;
+        Assert.False(CarryOn.Settling(seen: 2, active: 2, now.AddMinutes(-5), now));
+        Assert.True(CarryOn.Settling(seen: 1, active: 2, now.AddMinutes(-5), now)); // the Remote Control side has not seen the new login: nothing is queued yet
+        Assert.True(CarryOn.Settling(seen: null, active: 2, now.AddMinutes(-5), now));
+        Assert.True(CarryOn.Settling(seen: 2, active: 2, now.AddSeconds(-5), now)); // switched five seconds ago: the queue is being filled
+        Assert.False(CarryOn.Settling(seen: 2, active: 2, now - RcReconnect.FirstWait, now));
+        Assert.False(CarryOn.Settling(seen: 2, active: 2, DateTime.MaxValue, now)); // the login's record is unreadable: nothing to wait for
+    }
+
+    [Fact]
+    public void TheHelpersAnswerEndsAStopOrTriesItAgain()
+    {
+        Assert.Equal((true, 0, 0), Short(CarryOn.After("sent", 0, 0)));
+        Assert.Equal((true, 0, 3), Short(CarryOn.After("left mismatch", 0, 3)));
+        Assert.Equal((false, 1, 0), Short(CarryOn.After("aborted typing", 0, 0))); // typed and taken out again: once more
+        Assert.Equal((true, 2, 0), Short(CarryOn.After("aborted no-stop", 1, 0))); // twice: done with
+        foreach (var answer in new[] { "refused not-empty", "error attach", "" })
+        {
+            var after = CarryOn.After(answer, 1, 0);
+            Assert.Equal((false, 1, 1), Short(after)); // typed nothing: never the end of a stop
+            Assert.Equal((TimeSpan.FromMinutes(1), false), (after.Wait, after.Tell));
+        }
+        // Half an hour of refusals: the owner is told, once, and it is tried every ten minutes from then on.
+        Assert.Equal((false, TimeSpan.FromMinutes(1), false), Slow(CarryOn.After("refused not-empty", 0, CarryOn.Patience - 2)));
+        Assert.Equal((false, TimeSpan.FromMinutes(10), true), Slow(CarryOn.After("refused not-empty", 0, CarryOn.Patience - 1)));
+        Assert.Equal((false, TimeSpan.FromMinutes(10), false), Slow(CarryOn.After("refused not-empty", 0, CarryOn.Patience)));
+        Assert.Equal((true, TimeSpan.FromMinutes(10), false), Slow(CarryOn.After("sent", 0, CarryOn.Patience))); // the box cleared: typed after all
+
+        static (bool, int, int) Short((bool Done, int Tries, int Refusals, TimeSpan Wait, bool Tell) a) => (a.Done, a.Tries, a.Refusals);
+        static (bool, TimeSpan, bool) Slow((bool Done, int Tries, int Refusals, TimeSpan Wait, bool Tell) a) => (a.Done, a.Wait, a.Tell);
     }
 
     [Fact]
@@ -303,5 +439,6 @@ public class CarryOnTests : IDisposable
         Assert.Equal(new[] { "a1", "a3" }, CarryOn.Open(["""{"type":"launched"}""", Started("a1"), Started("a2"), Result("a2"), Started("a3"), "{\"type\":\"result\",\"agentId\":\"a1"]));
         Assert.Equal(new[] { "a2" }, CarryOn.Open([Started("a2"), Result("a2"), Started("a2")])); // started again after it returned
         Assert.Empty(CarryOn.Open(["""{"type":"launched"}"""]));
+        Assert.Equal(new[] { "a2", "a9" }, CarryOn.Open([Started("a1"), Started("a2"), Started("a9", step: "a1")])); // a1's step started again under a new id
     }
 }

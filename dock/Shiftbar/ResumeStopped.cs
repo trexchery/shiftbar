@@ -242,8 +242,8 @@ public static class ResumeStopped
 
     /// The workflow runs still going in a project folder (`projects/<cwd>`), as of a window started at `sinceUtc`. Every session
     /// folder is looked at: after /clear or a fork a background run keeps writing under the old session id. A run counts when its
-    /// journal was written since the window started (a run of a dead process is older) and it has no settlement snapshot
-    /// (`<sid>/workflows/<run>.json`, written only as it settles). Task outputs (`w*.output`) are not used: they name no run.
+    /// journal was written since the window started (a run of a dead process is older) and it has not settled (`Settled`).
+    /// Task outputs (`w*.output`) are not used: they name no run.
     public static List<WorkflowRun> RunningWorkflows(string projectDir, DateTime sinceUtc)
     {
         var runs = new List<WorkflowRun>();
@@ -260,7 +260,7 @@ public static class ResumeStopped
                     if (!File.Exists(journal)) continue;
                     var wrote = File.GetLastWriteTimeUtc(journal);
                     var id = Path.GetFileName(run);
-                    if (wrote <= sinceUtc || File.Exists(Path.Combine(session, "workflows", id + ".json"))) continue;
+                    if (wrote <= sinceUtc || Settled(session, id, journal)) continue;
                     runs.Add(new WorkflowRun(sid, id));
                 }
             }
@@ -268,6 +268,13 @@ public static class ResumeStopped
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return runs;
     }
+
+    /// Whether a run has settled: its snapshot (`<sid>/workflows/<run>.json`, written as it settles) is there and not older
+    /// than its journal. A run resumed under its own id (`resumeFromRunId`) keeps the snapshot of its first life while its
+    /// journal goes on: it is running again until the snapshot is rewritten.
+    internal static bool Settled(string sessionDir, string run, string journal) =>
+        Path.Combine(sessionDir, "workflows", run + ".json") is var snapshot && File.Exists(snapshot)
+        && File.GetLastWriteTimeUtc(snapshot) >= File.GetLastWriteTimeUtc(journal);
 
     /// Whether the conversation's last message is Claude Code's own usage-limit error.
     public static bool EndsAtLimit(IEnumerable<string> lines) => LimitOf(lines) != null;
