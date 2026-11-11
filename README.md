@@ -26,7 +26,7 @@
 - **🔀 Switch without breaking anything.** One click, or auto-switch near a limit; an account you pick yourself stays until it runs out. A switch never closes or restarts a Claude Code window, and on Windows Remote Control reconnects in idle windows afterwards.
 - **🪟 Accounts side by side.** Open a terminal as any account while the others keep running. Pin a project folder to an account.
 - **📊 Every limit in one place.** 5-hour and weekly meters for each account, a pace forecast, the next reset, and one `/stats` across all accounts.
-- **⏭️ Carry on at a limit.** On Windows, when a session stops at its limit, one click continues it on the account with room, conversation intact.
+- **⏭️ Carry on at a limit.** On Windows, when a session stops at its limit, one click continues it on the account with room, conversation intact. With auto-switch on, a window whose background agents the limit stopped is told to carry on by itself once its account has room again.
 
 ## How it compares
 
@@ -109,8 +109,8 @@ Point it at the `tabtag.js` beside `shiftbar.exe`, and use a folder path with no
 <summary><b>Good to know</b></summary>
 
 - **Local only.** No telemetry, no cloud sync, no proxy. Logins stay on your machine: DPAPI on Windows, the Keychain on macOS.
-- **Never interrupts.** Shiftbar doesn't close or restart a Claude Code window you can see. With auto-switch on, a session whose terminal has already died is reopened with `--resume` (Windows). The only thing it ever types is `/remote-control`, into an idle window with an empty prompt, while you're away from the keyboard.
-- **Windows only, for now:** the Sessions panel, Continue on, reopening dead sessions with `--resume`, and Remote Control reconnect. macOS has the rest in its menu bar; [docs/macos.md](docs/macos.md) lists the gaps.
+- **Never interrupts.** Shiftbar doesn't close or restart a Claude Code window you can see. With auto-switch on, a session whose terminal has already died is reopened with `--resume` (Windows). It types two things only, each into an idle window with an empty prompt while you're away from the keyboard: `/remote-control` after a switch, and, with auto-switch on, one line that starts with `Shiftbar:` and tells a window to carry on. That line goes to a window that ended its turn waiting for background agents (a workflow's agents, or subagents) which a usage limit then stopped: once per stop, when the account the window runs on has room again (after a switch, or once the limit has reset), and never when the window has moved on or someone has typed in it since.
+- **Windows only, for now:** the Sessions panel, Continue on, reopening dead sessions with `--resume`, Remote Control reconnect, and carrying on after a limit stopped a window's background agents. macOS has the rest in its menu bar; [docs/macos.md](docs/macos.md) lists the gaps.
 - **Browser follows the account (opt-in).** Chromium browsers only: Chrome, Chrome Canary, Edge and Brave. On every switch, including one made with `cswap`, Shiftbar opens the new account's profile unless it is already open. A running Claude session stays tied to the profile it started with, so the old account's windows close only once every session that started before the switch has ended. Turn off **Close the old account's windows** to keep them. The current account's profile is never closed. On macOS, closing windows needs Accessibility permission (System Settings → Privacy & Security → Accessibility); without it they stay open.
 - **One `/stats`.** Usage on your other accounts is added to the "All time" view of your normal `claude` once each UTC day ends. Preview with `cswap stats-sync --dry-run`.
 - **Unsigned releases**, so SmartScreen may warn. A `.sha256` checksum ships with every download. See [SECURITY.md](SECURITY.md).

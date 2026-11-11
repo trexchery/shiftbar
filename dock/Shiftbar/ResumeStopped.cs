@@ -18,6 +18,7 @@ public sealed record StoppedSession(int Pid, string SessionId, string Cwd, strin
     /// `Cut`: an orphan stopped mid-turn (not at a limit, not interrupted by its user): it is told to carry on.
     /// `Orphan`: its terminal is gone (console host dead), so no one can reach the window and its record never leaves "busy": it counts as done.
     /// A workflow run is still going in the window's project folder: the window looks idle, but closing it would end the run.
+    /// (A run whose agents a limit stopped never settles either: `CarryOn` tells that window, in place, to resume it.)
     public bool Running => Runs is { Count: > 0 };
     /// Idle, or in a shell at its limit: its turn is over and it cannot carry on where it is. The close kills only claude,
     /// so the background command runs on to its end (the reopened window is told). A window running workflows keeps its record
@@ -328,7 +329,7 @@ public static class ResumeStopped
     }
 
     /// A user line Claude never answers: a local slash command (/usage, /model…), its output, or a /compact summary.
-    static bool IsLocal(JsonElement r) =>
+    internal static bool IsLocal(JsonElement r) =>
         r.TryGetProperty("isMeta", out var meta) && meta.ValueKind == JsonValueKind.True
         || r.TryGetProperty("isCompactSummary", out var cs) && cs.ValueKind == JsonValueKind.True
         || r.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.Object && Str(m, "content") is { } text
@@ -669,10 +670,10 @@ public static class ResumeStopped
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return []; }
     }
 
-    /// Saves `moves`, dropping entries a day old: by then no guard needs them.
-    public static void SaveMoves(string path, Dictionary<string, DateTime> moves, DateTime nowUtc)
+    /// Saves `moves`, dropping entries a day old (`keep`: another age): by then no guard needs them.
+    public static void SaveMoves(string path, Dictionary<string, DateTime> moves, DateTime nowUtc, TimeSpan? keep = null)
     {
-        foreach (var k in moves.Where(m => nowUtc - m.Value > TimeSpan.FromDays(1)).Select(m => m.Key).ToList()) moves.Remove(k);
+        foreach (var k in moves.Where(m => nowUtc - m.Value > (keep ?? TimeSpan.FromDays(1))).Select(m => m.Key).ToList()) moves.Remove(k);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, JsonSerializer.Serialize(moves));
     }

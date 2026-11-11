@@ -217,6 +217,7 @@ public sealed partial class TrayApp : ApplicationContext
                 _limitWatch.Poll(ResumeStopped.LiveTranscripts(dirs, DateTime.UtcNow));
             });
             await RcTickAsync();
+            await CarryOnTickAsync(); // a window whose background agents a limit stopped is told to carry on
             BrowserTick();
         }
         catch (Exception e) { Program.Log(e); }
