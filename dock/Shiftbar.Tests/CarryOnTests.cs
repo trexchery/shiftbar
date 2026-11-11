@@ -194,7 +194,7 @@ public class CarryOnTests : IDisposable
         Directory.Delete(Path.Combine(_t.Path, "sessions"), true);
         File.SetLastWriteTimeUtc(journal, Later - CarryOn.Working);
         Assert.NotNull(Stop()); // nothing written there for long: a dead window's run
-        File.SetLastWriteTimeUtc(journal, DateTime.UtcNow);
+        File.SetLastWriteTimeUtc(journal, DateTime.UtcNow.AddSeconds(-1)); // a second back: a file's own stamp can lag the clock read here
         Directory.CreateDirectory(Path.Combine(Project, "old-sid", "workflows"));
         File.WriteAllText(Path.Combine(Project, "old-sid", "workflows", "wf_o.json"), "{}");
         Assert.NotNull(Stop()); // settled
