@@ -887,6 +887,35 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
         });
     }
 
+    /// While a row animates, the list's client area must stay the same width. A row grew inside a list that had not grown
+    /// yet, so the list overflowed for a frame: its vertical scrollbar flashed on, the rows no longer fit across, and the
+    /// horizontal one came with it, so the rows jittered sideways every frame.
+    [Fact]
+    public void AnimatingARowFlashesNoScrollbar()
+    {
+        var snap = new Snapshot(1, 1,
+        [
+            new Account(1, "a@example.com", true, "ok", null),
+            new Account(2, "b@example.com", false, "ok", null),
+        ]);
+        Sta(() =>
+        {
+            using var form = NewForm();
+            form.Render(snap, null);
+            form.Show();
+            True(Until(() => form.Visible && IsWindowVisible(form.Handle)), "the flyout never showed");
+            var rows = FindRows(form).ToList();
+            var list = rows[0].Parent!;
+            var widths = new List<int> { list.ClientSize.Width };
+            list.ClientSizeChanged += (_, _) => widths.Add(list.ClientSize.Width);
+            form.ToggleRow(rows[0]);
+            True(Until(() => !rows[0].Animating), "the first row never finished opening");
+            form.ToggleRow(rows[1]);
+            True(Until(() => !rows[0].Animating && !rows[1].Animating), "the rows never finished animating");
+            True(widths.Distinct().Count() == 1, $"the list's width jittered: {Show(widths)}");
+        });
+    }
+
     /// A row lists its account's project folders in the expanded view when they fit on a line,
     /// and always in its context menu (open a pinned terminal there, or remove the assignment).
     [Fact]
