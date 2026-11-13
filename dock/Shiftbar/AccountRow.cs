@@ -25,7 +25,6 @@ public sealed class AccountRow : Control
     readonly IReadOnlyList<ProjectMapping> _projects;
     readonly string? _projectsLine; // only when every leaf name fits on one line; the context menu always lists them
     readonly ToolTip _tip = new();
-    readonly System.Windows.Forms.Timer _anim = new() { Interval = 15 };
     readonly List<(Rectangle Rect, string Action, string Label)> _buttons = [];
     Rectangle _projectsRect;
     float _t, _target; // 0 = collapsed, 1 = expanded
@@ -74,22 +73,28 @@ public sealed class AccountRow : Control
                 _projectsLine = line;
         }
 
-        _anim.Tick += (_, _) =>
-        {
-            _t += (_target - _t) * 0.35f;
-            if (Math.Abs(_target - _t) < 0.02f) { _t = _target; _anim.Stop(); }
-            Height = Collapsed + (int)((ExpandedHeight - Collapsed) * _t);
-        };
     }
 
     int ExpandedHeight =>
         Collapsed + _windows.Count * Ui.S(22) + (_note != null ? Ui.S(22) : 0) + (_projectsLine != null ? Ui.S(22) : 0) + Ui.S(44);
 
+    public bool Animating => _t != _target;
+
+    /// One animation frame. The flyout steps every row from one timer and resizes once per frame: a timer per row
+    /// resized the flyout once for the row collapsing and again for the row expanding, so it bounced up and down.
+    public void Step()
+    {
+        _t += (_target - _t) * 0.35f;
+        if (Math.Abs(_target - _t) < 0.02f) _t = _target;
+        // Round, not truncate: the closing and opening rows' heights then still add up to the same total, so no 1px wobble.
+        Height = Collapsed + (int)Math.Round((ExpandedHeight - Collapsed) * _t);
+    }
+
+    /// Animated: the caller drives Step() until Animating is false.
     public void SetExpanded(bool expanded, bool animate = true)
     {
         _target = expanded ? 1 : 0;
-        if (animate && IsHandleCreated) _anim.Start();
-        else { _t = _target; Height = expanded ? ExpandedHeight : Collapsed; }
+        if (!animate || !IsHandleCreated) { _t = _target; Height = expanded ? ExpandedHeight : Collapsed; }
     }
 
     string Meta()
@@ -315,7 +320,7 @@ public sealed class AccountRow : Control
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _anim.Dispose(); _tip.Dispose(); }
+        if (disposing) { _tip.Dispose(); }
         base.Dispose(disposing);
     }
 }

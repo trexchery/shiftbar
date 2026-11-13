@@ -10,6 +10,8 @@ public sealed class DashboardForm : Form
     readonly Panel _header, _footer;
     readonly Pill _pin, _close, _refresh, _best, _settingsIcon, _add;
     readonly ToolTip _tips = new();
+    readonly System.Windows.Forms.Timer _rowAnim = new() { Interval = 15 };
+    bool _stepping; // rows are mid-frame: resize once after all of them, not once per row
     int? _expanded, _ring; // account numbers: one email can be two accounts (two orgs)
     Icon? _appIcon;
     string _refreshed = "", _updated = "", _summary = "";
@@ -46,6 +48,7 @@ public sealed class DashboardForm : Form
         Width = Ui.S(AccountRow.BaseWidth + 16);
         Icon = TrayIcons.App;
         Padding = new Padding(1);
+        _rowAnim.Tick += (_, _) => StepRows();
 
         // The header: the icon and the name with the actions beside them, and under them, full width, the cross-account summary.
         _header = new Panel { Dock = DockStyle.Top, Height = Ui.S(52) };
@@ -208,7 +211,7 @@ public sealed class DashboardForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _tips.Dispose(); _appIcon?.Dispose(); }
+        if (disposing) { _tips.Dispose(); _rowAnim.Dispose(); _appIcon?.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -324,12 +327,24 @@ public sealed class DashboardForm : Form
             dark = Palette.Current.IsDark,
         });
 
-    void ToggleRow(AccountRow row)
+    internal void ToggleRow(AccountRow row)
     {
         var open = !row.Expanded;
         foreach (var r in _list.Controls.OfType<AccountRow>()) if (r != row && r.Expanded) r.SetExpanded(false);
         row.SetExpanded(open);
         _expanded = open ? row.Account.Number : null;
+        _rowAnim.Start();
+    }
+
+    /// One frame for every row at once (the one closing and the one opening), then one resize.
+    void StepRows()
+    {
+        var rows = _list.Controls.OfType<AccountRow>().Where(r => r.Animating).ToList();
+        _stepping = true;
+        foreach (var r in rows) r.Step();
+        _stepping = false;
+        if (!rows.Any(r => r.Animating)) _rowAnim.Stop();
+        FitHeight();
     }
 
     /// Small muted caps above a group of rows.
@@ -400,13 +415,14 @@ public sealed class DashboardForm : Form
     /// Grows/shrinks with content, keeping the edge nearest the taskbar fixed.
     void FitHeight()
     {
+        if (_stepping) return;
         var content = _settings?.ContentHeight ?? _list.Controls.Cast<Control>().Sum(c => c.Height + c.Margin.Vertical) + _list.Padding.Vertical;
         var screenHeight = WorkAreaHeight ?? Screen.FromPoint(Visible ? Location : Cursor.Position).WorkingArea.Height;
         var h = Math.Min(_header.Height + (_settings == null ? _footer.Height : 0) + content + Padding.Vertical, (int)(screenHeight * 0.8));
         if (h == Height) return;
-        var bottom = Bottom;
-        Height = h;
-        if (Visible && !Pinned) Top = bottom - h;
+        // One move: setting Height then Top drew the flyout at the old top for a frame, so it jittered while animating.
+        if (Visible && !Pinned) SetBounds(Left, Bottom - h, Width, h);
+        else Height = h;
     }
 
     public void ShowNearTray()

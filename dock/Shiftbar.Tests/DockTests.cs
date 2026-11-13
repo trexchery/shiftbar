@@ -857,6 +857,36 @@ public class RenderTests(Xunit.Abstractions.ITestOutputHelper output)
         });
     }
 
+    /// Opening one row while another is open animates both at once: the flyout must grow or shrink in one direction with
+    /// its bottom edge still, not bounce (a timer per row resized it down for the closing row, then up for the opening one).
+    [Fact]
+    public void SwitchingTheOpenRowDoesNotBounceTheFlyout()
+    {
+        var snap = new Snapshot(1, 1,
+        [
+            new Account(1, "a@example.com", true, "ok", null),
+            new Account(2, "b@example.com", false, "ok", null),
+        ]);
+        Sta(() =>
+        {
+            using var form = NewForm();
+            form.Render(snap, null);
+            form.Show();
+            True(Until(() => form.Visible && IsWindowVisible(form.Handle)), "the flyout never showed");
+            var rows = FindRows(form).ToList();
+            form.ToggleRow(rows[0]);
+            True(Until(() => !rows[0].Animating), "the first row never finished opening");
+            var bottom = form.Bottom;
+            var heights = new List<int> { form.Height };
+            form.SizeChanged += (_, _) => heights.Add(form.Height);
+            form.ToggleRow(rows[1]);
+            True(Until(() => !rows[0].Animating && !rows[1].Animating), "the rows never finished animating");
+            var steps = heights.Zip(heights.Skip(1), (a, b) => Math.Sign(b - a)).Where(d => d != 0).Distinct().Count();
+            True(steps <= 1, $"the flyout bounced: heights {Show(heights)}");
+            Eq(bottom, form.Bottom, "the bottom edge stays put");
+        });
+    }
+
     /// A row lists its account's project folders in the expanded view when they fit on a line,
     /// and always in its context menu (open a pinned terminal there, or remove the assignment).
     [Fact]
