@@ -336,15 +336,19 @@ public sealed class DashboardForm : Form
         _rowAnim.Start();
     }
 
-    /// One frame for every row at once (the one closing and the one opening), then one resize.
+    /// One frame for every row at once (the one closing and the one opening), then one resize, then one layout of the list.
+    /// The list lays out only after the flyout has its new height: laid out first, a growing row overflowed it for the
+    /// frame, its scrollbar flashed on and took 17px, and the rows jittered sideways.
     void StepRows()
     {
         var rows = _list.Controls.OfType<AccountRow>().Where(r => r.Animating).ToList();
+        _list.SuspendLayout();
         _stepping = true;
         foreach (var r in rows) r.Step();
         _stepping = false;
         if (!rows.Any(r => r.Animating)) _rowAnim.Stop();
         FitHeight();
+        _list.ResumeLayout();
     }
 
     /// Small muted caps above a group of rows.
