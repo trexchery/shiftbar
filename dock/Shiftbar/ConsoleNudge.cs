@@ -17,6 +17,9 @@ namespace Shiftbar;
 /// Results: `sent`, `refused <why>` (nothing typed), `aborted <why>` (typed, then removed), `left <why>` (typed, box not as
 /// expected, nothing more done), `error <why>`. `rc-nudge --probe <pid>` reads the box only and prints its shape, never its text
 /// (shiftbar.exe is a GUI program: a shell shows its line only when piped, e.g. `shiftbar.exe rc-nudge --probe 1234 | Out-String`).
+/// `--carry-on` types the other line Shiftbar knows instead, `CarryOn.Line`, into a window left waiting after a usage limit
+/// stopped its background agents: the same steps and results, with `CarryOn.StopOf` (the stop still stands, nobody typed,
+/// nothing ran since) checked beside the gates at every look. The text is never taken from the command line.
 public static class ConsoleNudge
 {
     public const string Command = "/remote-control";
@@ -115,8 +118,9 @@ public static class ConsoleNudge
             line = !OperatingSystem.IsWindows() ? "error not-windows" : args switch
             {
                 ["--probe", var p] when int.TryParse(p, out var pid) => Probe(pid),
-                [var p, var sid, .. var rest] when int.TryParse(p, out var pid) && rest.All(a => a == "--manual") => Nudge(pid, sid, rest.Length > 0),
-                _ => "error usage: rc-nudge <pid> <session-id> [--manual] | rc-nudge --probe <pid>",
+                [var p, var sid, .. var rest] when int.TryParse(p, out var pid) && rest.All(a => a is "--manual" or "--carry-on")
+                    => Nudge(pid, sid, rest.Contains("--manual"), rest.Contains("--carry-on")),
+                _ => "error usage: rc-nudge <pid> <session-id> [--manual] [--carry-on] | rc-nudge --probe <pid>",
             };
         }
         catch (Exception e) { line = "error " + e.GetType().Name; }
@@ -135,10 +139,25 @@ public static class ConsoleNudge
         return $"probe {state}: {box.Why}; window {s.Width}x{s.Rows.Count}, cursor row {s.CursorRow + 1}; shape {Shape(s.Rows, s.Width)}";
     }
 
-    static string Nudge(int pid, string sid, bool manual)
+    static string Nudge(int pid, string sid, bool manual, bool carryOn = false)
     {
-        var dir = ResumeStopped.DefaultDir;
-        if (RemoteControl.Ready(dir, pid, sid, manual) is { } busy) return "refused " + busy;
+        // A carry-on may be owed to a `cswap run` window too, so its own record says which config dir; `/remote-control` is
+        // only ever the default login's.
+        var live = carryOn ? ResumeStopped.LiveSessions(ResumeStopped.ConfigDirs(null)).FirstOrDefault(l => l.Pid == pid && l.SessionId == sid) : null;
+        if (carryOn && live == null) return "refused no-session";
+        var dir = live?.ConfigDir ?? ResumeStopped.DefaultDir;
+        AgentStop? stop = null;
+        // Every look: the gates, and for a carry-on that the very stop first seen still stands.
+        string? Ready()
+        {
+            if (RemoteControl.Ready(dir, pid, sid, manual) is { } gate) return gate;
+            if (live == null) return null;
+            var standing = CarryOn.StopOf(live, DateTime.UtcNow);
+            if (standing == null || stop != null && standing.Limit.At != stop.Limit.At) return "no-stop";
+            stop = standing;
+            return null;
+        }
+        if (Ready() is { } busy) return "refused " + busy;
         using var con = Attached.Open(pid, out var why);
         if (con == null) return "refused " + why;
         if (con.Read() is not { } s) return "refused unreadable";
@@ -146,17 +165,18 @@ public static class ConsoleNudge
         if (box.State != BoxState.Empty) return "refused " + (box.State == BoxState.Text ? "not-empty" : "unrecognised");
         // The session keeps its name in the Claude app: its title goes with the command, when the whole line fits on one
         // row of the prompt (a wrapped line could not be read back as typed).
-        var title = ResumeStopped.TranscriptOf(dir, sid, "") is { } t ? RemoteControl.TitleOf(t) : null;
-        var cmd = RemoteControl.Command(title);
+        var title = stop == null && ResumeStopped.TranscriptOf(dir, sid, "") is { } t ? RemoteControl.TitleOf(t) : null;
+        var cmd = stop != null ? CarryOn.Line(stop, s.Width - 8) : RemoteControl.Command(title);
+        if (cmd == null) return "refused too-narrow";
         if (cmd.Length + 8 > s.Width) cmd = Command;
-        if (RemoteControl.Ready(dir, pid, sid, manual) is { } late) return "refused " + late; // right before typing
+        if (Ready() is { } late) return "refused " + late; // right before typing
         var written = con.Type(cmd);
         if (written == 0) return "refused write-failed";
         var after = WaitFor(con, b => b.Text == cmd);
         if (written != cmd.Length * 2 || after?.Text != cmd)
             return after?.State == BoxState.Empty && con.Pending() ? "left pending-input"
                 : "left " + (after == null ? "unreadable" : after.Text.StartsWith(cmd) ? "mismatch-after-command" : "mismatch");
-        if (RemoteControl.Ready(dir, pid, sid, manual) is { } changed) return Remove(con, cmd, changed);
+        if (Ready() is { } changed) return Remove(con, cmd, changed);
         // Ready reads files for a while: the box is read once more, with nothing slow between this and Enter.
         if (con.Read() is not { } last) return "left unreadable";
         if (Parse(last.Rows, last.Width, typed: true).Text != cmd) return "left mismatch";
@@ -184,7 +204,8 @@ public static class ConsoleNudge
     }
 
     /// Starts the helper (the tray's own exe) and returns its result line; never throws. `env`: extra variables (tests).
-    public static async Task<string> RunAsync(string exe, int pid, string sessionId, bool manual, IReadOnlyDictionary<string, string>? env = null)
+    /// `carryOn`: type `CarryOn.Line` instead of `/remote-control`.
+    public static async Task<string> RunAsync(string exe, int pid, string sessionId, bool manual, IReadOnlyDictionary<string, string>? env = null, bool carryOn = false)
     {
         try
         {
@@ -192,7 +213,7 @@ public static class ConsoleNudge
             // unredirected stream would land on the user's Claude Code window.
             var psi = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true,
                 RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8 };
-            foreach (var a in new[] { "rc-nudge", pid.ToString(), sessionId }.Concat(manual ? ["--manual"] : [])) psi.ArgumentList.Add(a);
+            foreach (var a in new[] { "rc-nudge", pid.ToString(), sessionId }.Concat(manual ? ["--manual"] : []).Concat(carryOn ? ["--carry-on"] : [])) psi.ArgumentList.Add(a);
             foreach (var (k, v) in env ?? new Dictionary<string, string>()) psi.Environment[k] = v;
             using var p = Process.Start(psi) ?? throw new InvalidOperationException("not started");
             var read = p.StandardOutput.ReadToEndAsync();

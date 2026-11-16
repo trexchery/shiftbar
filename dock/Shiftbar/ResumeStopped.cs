@@ -18,6 +18,7 @@ public sealed record StoppedSession(int Pid, string SessionId, string Cwd, strin
     /// `Cut`: an orphan stopped mid-turn (not at a limit, not interrupted by its user): it is told to carry on.
     /// `Orphan`: its terminal is gone (console host dead), so no one can reach the window and its record never leaves "busy": it counts as done.
     /// A workflow run is still going in the window's project folder: the window looks idle, but closing it would end the run.
+    /// (A run whose agents a limit stopped never settles either: `CarryOn` tells that window, in place, to resume it.)
     public bool Running => Runs is { Count: > 0 };
     /// Idle, or in a shell at its limit: its turn is over and it cannot carry on where it is. The close kills only claude,
     /// so the background command runs on to its end (the reopened window is told). A window running workflows keeps its record
@@ -241,8 +242,8 @@ public static class ResumeStopped
 
     /// The workflow runs still going in a project folder (`projects/<cwd>`), as of a window started at `sinceUtc`. Every session
     /// folder is looked at: after /clear or a fork a background run keeps writing under the old session id. A run counts when its
-    /// journal was written since the window started (a run of a dead process is older) and it has no settlement snapshot
-    /// (`<sid>/workflows/<run>.json`, written only as it settles). Task outputs (`w*.output`) are not used: they name no run.
+    /// journal was written since the window started (a run of a dead process is older) and it has not settled (`Settled`).
+    /// Task outputs (`w*.output`) are not used: they name no run.
     public static List<WorkflowRun> RunningWorkflows(string projectDir, DateTime sinceUtc)
     {
         var runs = new List<WorkflowRun>();
@@ -259,7 +260,7 @@ public static class ResumeStopped
                     if (!File.Exists(journal)) continue;
                     var wrote = File.GetLastWriteTimeUtc(journal);
                     var id = Path.GetFileName(run);
-                    if (wrote <= sinceUtc || File.Exists(Path.Combine(session, "workflows", id + ".json"))) continue;
+                    if (wrote <= sinceUtc || Settled(session, id, journal)) continue;
                     runs.Add(new WorkflowRun(sid, id));
                 }
             }
@@ -267,6 +268,13 @@ public static class ResumeStopped
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         return runs;
     }
+
+    /// Whether a run has settled: its snapshot (`<sid>/workflows/<run>.json`, written as it settles) is there and not older
+    /// than its journal. A run resumed under its own id (`resumeFromRunId`) keeps the snapshot of its first life while its
+    /// journal goes on: it is running again until the snapshot is rewritten.
+    internal static bool Settled(string sessionDir, string run, string journal) =>
+        Path.Combine(sessionDir, "workflows", run + ".json") is var snapshot && File.Exists(snapshot)
+        && File.GetLastWriteTimeUtc(snapshot) >= File.GetLastWriteTimeUtc(journal);
 
     /// Whether the conversation's last message is Claude Code's own usage-limit error.
     public static bool EndsAtLimit(IEnumerable<string> lines) => LimitOf(lines) != null;
@@ -328,7 +336,7 @@ public static class ResumeStopped
     }
 
     /// A user line Claude never answers: a local slash command (/usage, /model…), its output, or a /compact summary.
-    static bool IsLocal(JsonElement r) =>
+    internal static bool IsLocal(JsonElement r) =>
         r.TryGetProperty("isMeta", out var meta) && meta.ValueKind == JsonValueKind.True
         || r.TryGetProperty("isCompactSummary", out var cs) && cs.ValueKind == JsonValueKind.True
         || r.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.Object && Str(m, "content") is { } text
@@ -669,10 +677,10 @@ public static class ResumeStopped
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return []; }
     }
 
-    /// Saves `moves`, dropping entries a day old: by then no guard needs them.
-    public static void SaveMoves(string path, Dictionary<string, DateTime> moves, DateTime nowUtc)
+    /// Saves `moves`, dropping entries a day old (`keep`: another age): by then no guard needs them.
+    public static void SaveMoves(string path, Dictionary<string, DateTime> moves, DateTime nowUtc, TimeSpan? keep = null)
     {
-        foreach (var k in moves.Where(m => nowUtc - m.Value > TimeSpan.FromDays(1)).Select(m => m.Key).ToList()) moves.Remove(k);
+        foreach (var k in moves.Where(m => nowUtc - m.Value > (keep ?? TimeSpan.FromDays(1))).Select(m => m.Key).ToList()) moves.Remove(k);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, JsonSerializer.Serialize(moves));
     }

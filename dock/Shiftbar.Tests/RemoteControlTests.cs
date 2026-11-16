@@ -506,7 +506,8 @@ public class ConsoleNudgeIntegrationTests
         $"{Path.DirectorySeparatorChar}Shiftbar.Tests{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
         $"{Path.DirectorySeparatorChar}Shiftbar{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"), "shiftbar.exe");
 
-    static async Task<(string Result, string? Received, string? Probe)> Run(string pre)
+    /// `carryOn`: the helper's other line (`--carry-on`); `stopped`: a subagent of the session ended at a usage limit.
+    static async Task<(string Result, string? Received, string? Probe)> Run(string pre, bool carryOn = false, bool stopped = true)
     {
         using var t = new TempDir();
         var script = Path.Combine(t.Path, "fake.ps1");
@@ -532,10 +533,27 @@ public class ConsoleNudgeIntegrationTests
             var project = Path.Combine(claude, "projects", System.Text.RegularExpressions.Regex.Replace(cwd, "[^A-Za-z0-9]", "-"));
             Directory.CreateDirectory(project);
             var transcript = Path.Combine(project, "s1.jsonl");
-            File.WriteAllText(transcript, """{"type":"assistant","message":{"role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"All done."}]}}""" + "\n");
-            File.SetLastWriteTimeUtc(transcript, DateTime.UtcNow.AddMinutes(-1));
+            File.WriteAllText(transcript, JsonSerializer.Serialize(new
+            {
+                type = "assistant", timestamp = DateTime.UtcNow.AddMinutes(-10).ToString("O"),
+                message = new { role = "assistant", stop_reason = "end_turn", content = new[] { new { type = "text", text = "All done." } } },
+            }) + "\n");
+            File.SetLastWriteTimeUtc(transcript, DateTime.UtcNow.AddMinutes(-5));
+            if (carryOn && stopped)
+            {
+                // A subagent the limit refused just now (so after the child started), its file quiet for five minutes.
+                var agent = Path.Combine(project, "s1", "subagents", "agent-b1.jsonl");
+                Directory.CreateDirectory(Path.GetDirectoryName(agent)!);
+                File.WriteAllText(agent, JsonSerializer.Serialize(new
+                {
+                    type = "assistant", isSidechain = true, agentId = "b1", timestamp = DateTime.UtcNow.ToString("O"), apiError = "usage_limit_reached", isApiErrorMessage = true,
+                    apiErrorParams = new { rate_limit_info = new { status = "rejected", resetsAt = DateTimeOffset.UtcNow.AddHours(2).ToUnixTimeSeconds(), rateLimitType = "five_hour" } },
+                    message = new { role = "assistant", model = "<synthetic>", content = new[] { new { type = "text", text = "You've hit your 5-hour limit" } } },
+                }) + "\n");
+                File.SetLastWriteTimeUtc(agent, DateTime.UtcNow.AddMinutes(-5));
+            }
             // --manual: the person at this machine may be typing elsewhere; the hidden console's input is the child's alone.
-            var result = await ConsoleNudge.RunAsync(Helper, child.Id, "s1", manual: true, new Dictionary<string, string> { ["USERPROFILE"] = home });
+            var result = await ConsoleNudge.RunAsync(Helper, child.Id, "s1", manual: true, new Dictionary<string, string> { ["USERPROFILE"] = home }, carryOn);
             for (var i = 0; i < 50 && result.StartsWith("sent") && !File.Exists(outFile); i++) await Task.Delay(100);
             // The box as it reads now: characters typed without Enter are echoed into it by the child's pending read.
             string? probe = null;
@@ -569,5 +587,32 @@ public class ConsoleNudgeIntegrationTests
         Assert.Equal("refused not-empty", result);
         Assert.Null(received);
         Assert.Contains("9 chars after marker", probe); // "half typed" alone: nothing was typed after it
+    }
+
+    [Fact]
+    public async Task TypesTheCarryOnLineIntoAnEmptyBoxOfAWindowLeftWaiting()
+    {
+        var (result, received, _) = await Run("", carryOn: true);
+        Assert.Equal("sent", result);
+        Assert.StartsWith("Shiftbar: a usage limit stopped ", received); // whichever wording fits the console's width
+        Assert.EndsWith(".", received);
+    }
+
+    [Fact]
+    public async Task TypesNoCarryOnLineWhenTheBoxHasText()
+    {
+        var (result, received, probe) = await Run("half typed", carryOn: true);
+        Assert.Equal("refused not-empty", result);
+        Assert.Null(received);
+        Assert.Contains("9 chars after marker", probe);
+    }
+
+    [Fact]
+    public async Task TypesNoCarryOnLineWhenNoStopStands()
+    {
+        var (result, received, probe) = await Run("", carryOn: true, stopped: false);
+        Assert.Equal("refused no-stop", result);
+        Assert.Null(received);
+        Assert.Contains("probe empty", probe);
     }
 }
